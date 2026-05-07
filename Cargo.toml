@@ -1,0 +1,22 @@
+[package]
+name = "tui-kit"
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+description = "Opinionated middleware for building TUI apps on ratatui + crossterm: components, registries, image rendering, async render scheduling, file watchers"
+repository = "https://github.com/scshafe/tui-kit"
+homepage = "https://github.com/scshafe/tui-kit"
+readme = "README.md"
+keywords = ["tui", "terminal", "ratatui", "crossterm", "kitty"]
+categories = ["command-line-interface", "rendering"]
+
+[dependencies]
+anyhow = "1.0"
+base64 = "0.22"
+crossterm = "0.28"
+fontdb = "0.23"
+libc = "0.2"
+log = "0.4"
+notify = "6"
+ratatui = "0.29"
+serde = { version = "1.0", features = ["derive"] }
