@@ -2,6 +2,7 @@
 //!
 //! Sits on top of [`ratatui`] and [`crossterm`]. Provides:
 //! - Unified [`events`] channel + producers (input, watcher, scheduler, ticks).
+//! - Optional [`component`] primitives for IDs, dirty tracking, and retained-ish UI.
 //! - Declarative [`keymap`] registry.
 //! - Cell + pixel [`tty`] metrics.
 //! - Image lifecycle via [`image`] surfaces.
@@ -17,6 +18,7 @@
 #![warn(missing_debug_implementations)]
 
 pub mod bar;
+pub mod component;
 pub mod config;
 pub mod events;
 pub mod image;
