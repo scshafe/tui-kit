@@ -90,7 +90,7 @@ impl CanvasMetrics {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PixelRect {
     pub x: u32,
     pub y: u32,
@@ -98,25 +98,58 @@ pub struct PixelRect {
     pub height: u32,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CellRect {
     pub cols: u16,
     pub rows: u16,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CellOffset {
     pub col: u16,
     pub row: u16,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct Placement {
     pub source: PixelRect,
     pub size: CellRect,
     pub origin: CellOffset,
     pub effective_scale: f32,
     pub fit_scale: f32,
+    pub visible_pixels: PixelSize,
+    pub unclipped_display_pixels: PixelSize,
+    pub clipped_sides: ClippedSides,
+    pub anchor: PlacementAnchor,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ClippedSides {
+    pub left: bool,
+    pub right: bool,
+    pub top: bool,
+    pub bottom: bool,
+}
+
+impl ClippedSides {
+    pub const NONE: Self = Self {
+        left: false,
+        right: false,
+        top: false,
+        bottom: false,
+    };
+
+    pub const fn any(self) -> bool {
+        self.left || self.right || self.top || self.bottom
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct PlacementAnchor {
+    pub image_x: f32,
+    pub image_y: f32,
+    pub normalized_x: f32,
+    pub normalized_y: f32,
 }
 
 pub const MIN_SCALE: f32 = 0.1;
@@ -418,16 +451,18 @@ fn place_with_policy(
 
     let display_w = image.width as f32 * effective;
     let display_h = image.height as f32 * effective;
-    let max_visible_w = match policy.overflow {
-        ImageOverflowPolicy::OverflowAndClipDestination => display_w,
-        _ => display_w.min(canvas_pixels.width as f32),
-    };
-    let max_visible_h = match policy.overflow {
-        ImageOverflowPolicy::OverflowAndClipDestination => display_h,
-        _ => display_h.min(canvas_pixels.height as f32),
-    };
+    let unclipped_display_pixels = PixelSize::new(
+        display_w.round().max(1.0).min(u32::MAX as f32) as u32,
+        display_h.round().max(1.0).min(u32::MAX as f32) as u32,
+    );
+    let max_visible_w = display_w.min(canvas_pixels.width as f32);
+    let max_visible_h = display_h.min(canvas_pixels.height as f32);
     let visible_w = max_visible_w.max(policy.min_visible_pixels.width as f32);
     let visible_h = max_visible_h.max(policy.min_visible_pixels.height as f32);
+    let visible_pixels = PixelSize::new(
+        visible_w.round().max(1.0).min(u32::MAX as f32) as u32,
+        visible_h.round().max(1.0).min(u32::MAX as f32) as u32,
+    );
 
     let (src_w, src_h) = match policy.overflow {
         ImageOverflowPolicy::FitWithinArea
@@ -454,6 +489,12 @@ fn place_with_policy(
     let center_y = center_y.clamp(0.0, 1.0);
     let center_image_x = center_x * image.width as f32;
     let center_image_y = center_y * image.height as f32;
+    let anchor = PlacementAnchor {
+        image_x: center_image_x,
+        image_y: center_image_y,
+        normalized_x: center_x,
+        normalized_y: center_y,
+    };
     let src_x = (center_image_x - src_w as f32 / 2.0)
         .round()
         .max(0.0)
@@ -472,6 +513,19 @@ fn place_with_policy(
 
     let origin_col = canvas.cells.cols.saturating_sub(target_cols) / 2;
     let origin_row = canvas.cells.rows.saturating_sub(target_rows) / 2;
+    let clipped_sides = clipped_sides(
+        image,
+        canvas_pixels,
+        src_x,
+        src_y,
+        src_w,
+        src_h,
+        display_w,
+        display_h,
+        visible_w,
+        visible_h,
+        policy.overflow,
+    );
 
     Placement {
         source: PixelRect {
@@ -490,6 +544,47 @@ fn place_with_policy(
         },
         effective_scale: effective,
         fit_scale: fit,
+        visible_pixels,
+        unclipped_display_pixels,
+        clipped_sides,
+        anchor,
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn clipped_sides(
+    image: PixelSize,
+    canvas_pixels: PixelSize,
+    src_x: u32,
+    src_y: u32,
+    src_w: u32,
+    src_h: u32,
+    display_w: f32,
+    display_h: f32,
+    visible_w: f32,
+    visible_h: f32,
+    overflow: ImageOverflowPolicy,
+) -> ClippedSides {
+    match overflow {
+        ImageOverflowPolicy::CropSourceToArea => ClippedSides {
+            left: src_x > 0,
+            right: src_x.saturating_add(src_w) < image.width,
+            top: src_y > 0,
+            bottom: src_y.saturating_add(src_h) < image.height,
+        },
+        ImageOverflowPolicy::OverflowAndClipDestination => {
+            let horizontal = display_w > visible_w || display_w > canvas_pixels.width as f32;
+            let vertical = display_h > visible_h || display_h > canvas_pixels.height as f32;
+            ClippedSides {
+                left: horizontal,
+                right: horizontal,
+                top: vertical,
+                bottom: vertical,
+            }
+        }
+        ImageOverflowPolicy::FitWithinArea | ImageOverflowPolicy::PreventZoomBeyondArea => {
+            ClippedSides::NONE
+        }
     }
 }
 
@@ -547,7 +642,7 @@ fn validate_positive_finite(path: &'static str, value: f32) -> Result<(), Config
     Ok(())
 }
 
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct ImagePoint {
     pub x: f32,
     pub y: f32,
@@ -639,6 +734,54 @@ mod tests {
         assert_eq!(placement.effective_scale, 2.0);
         assert_eq!(placement.size.cols, canvas.cells.cols);
         assert_eq!(placement.size.rows, canvas.cells.rows);
+        assert_eq!(placement.visible_pixels, canvas.pixels());
+        assert_eq!(placement.unclipped_display_pixels, PixelSize::new(800, 400));
+        assert_eq!(
+            placement.clipped_sides,
+            ClippedSides {
+                left: true,
+                right: true,
+                top: true,
+                bottom: true,
+            }
+        );
+        assert!(placement.clipped_sides.any());
+        assert_eq!(placement.anchor.normalized_x, 0.5);
+        assert_eq!(placement.anchor.normalized_y, 0.5);
+    }
+
+    #[test]
+    fn crop_source_reports_clipped_sides() {
+        let image = PixelSize::new(1000, 800);
+        let placement = ViewTransform::fit()
+            .with_scale(2.0)
+            .place(image, canvas(100, 50));
+
+        assert!(placement.clipped_sides.any());
+        assert!(placement.clipped_sides.left || placement.clipped_sides.right);
+        assert!(placement.clipped_sides.top || placement.clipped_sides.bottom);
+        assert!(placement.visible_pixels.width <= placement.unclipped_display_pixels.width);
+        assert_eq!(placement.anchor.normalized_x, 0.5);
+        assert_eq!(placement.anchor.normalized_y, 0.5);
+    }
+
+    #[test]
+    fn fit_within_area_reports_no_clipping() {
+        let image = PixelSize::new(400, 200);
+        let policy = PlacementPolicy {
+            overflow: ImageOverflowPolicy::FitWithinArea,
+            ..PlacementPolicy::crop_fit_centered()
+        };
+        let placement = PlacementEngine::new(policy).unwrap().place(
+            image,
+            canvas(100, 30),
+            ViewTransform::fit().with_scale(4.0),
+        );
+
+        assert_eq!(placement.source.width, image.width);
+        assert_eq!(placement.source.height, image.height);
+        assert_eq!(placement.clipped_sides, ClippedSides::NONE);
+        assert!(!placement.clipped_sides.any());
     }
 
     #[test]

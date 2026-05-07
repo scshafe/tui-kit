@@ -15,9 +15,9 @@ pub use crate::input::Key;
 pub use crate::keymap::{KeyBinding, KeyMap, KeyTrigger, SpecialKey};
 pub use crate::layout::{
     fit_scale, CanvasMetrics, CellOffset, CellPixel, CellRect, CellRoundingPolicy, CellSize,
-    ImageAnchorPolicy, ImageOverflowPolicy, ImagePoint, ImageScaleBasis, ImageZoomLimitPolicy,
-    PixelRect, PixelSize, Placement, PlacementEngine, PlacementPolicy, ViewTransform, MAX_SCALE,
-    MIN_SCALE,
+    ClippedSides, ImageAnchorPolicy, ImageOverflowPolicy, ImagePoint, ImageScaleBasis,
+    ImageZoomLimitPolicy, PixelRect, PixelSize, Placement, PlacementAnchor, PlacementEngine,
+    PlacementPolicy, ViewTransform, MAX_SCALE, MIN_SCALE,
 };
 pub use crate::scheduler::{Completion, Priority, Progress, Scheduler};
 pub use crate::terminal::Terminal;
