@@ -4,3 +4,4 @@ pub mod dialog;
 pub mod list;
 pub mod picker;
 pub mod table;
+pub mod tree;

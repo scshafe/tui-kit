@@ -24,6 +24,7 @@ Early. Extracted from [c4tui](https://github.com/scshafe/c4tui) as the reusable 
 | `tick` | Named periodic tick producers with explicit validation and stop handles |
 | `widgets::list` | Policy-light scrollable list mechanics with optional selection, exposed viewport math, explicit key actions |
 | `widgets::table` | Policy-light table mechanics with stable row/column IDs, sizing policies, row selection, and vertical/horizontal viewport math |
+| `widgets::tree` | Policy-light hierarchical state with expand/collapse, lazy-child hooks, optional tri-state checkboxes, stable IDs, and flattened viewport math |
 | `widgets::picker` | Generic list-with-detail-and-thumbnails picker, fuzzy filter, scrollable, selection highlight |
 | `widgets::dialog` | Modal with title, message, footer hint |
 | `terminal` | `Terminal` wrapping `ratatui::Terminal<CrosstermBackend>` + image registry + raw-mode lifecycle |

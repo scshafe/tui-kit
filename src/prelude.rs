@@ -50,3 +50,7 @@ pub use crate::widgets::table::{
     TableAction, TableAlignment, TableColumn, TableColumnId, TableColumnLayout, TableColumnSizing,
     TableConfig, TableOutcome, TableRow, TableRowId, TableSelectionMode, TableState, TableViewport,
 };
+pub use crate::widgets::tree::{
+    TreeAction, TreeCheckboxMode, TreeCheckboxState, TreeConfig, TreeNode, TreeNodeId, TreeOutcome,
+    TreeSelectionMode, TreeState, TreeViewport, TreeVisibleNode,
+};
