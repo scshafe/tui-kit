@@ -11,10 +11,13 @@
 
 #![warn(missing_debug_implementations)]
 
+pub mod bar;
 pub mod events;
 pub mod image;
 pub mod input;
 pub mod input_thread;
 pub mod keymap;
 pub mod layout;
+pub mod scheduler;
 pub mod tty;
+pub mod watcher;
