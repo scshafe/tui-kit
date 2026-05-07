@@ -7,12 +7,15 @@
 pub use crate::bar::{Segment, SegmentBar, SegmentSlot, StatusFragment};
 pub use crate::component::{
     BufferComponent, Cached, CachedRenderStats, Component, ComponentChildren, ComponentId,
-    ComponentOutcome, DirtyReason, DirtyState, FocusNode,
+    ComponentOutcome, DirtyReason, DirtyState,
 };
 pub use crate::config::{ConfigError, KitConfig, Validate};
 pub use crate::events::{
     AppEvent, AppEventReceiver, AppEventSender, InputEvent, RuntimeEvent, SchedulerEvent,
     TerminalEvent, TickEvent, WatcherEvent,
+};
+pub use crate::focus::{
+    FocusConfig, FocusId, FocusManager, FocusNode, FocusScopeKind, FocusTraversal,
 };
 pub use crate::image::{
     picker_placement_id, ImageBackendPreference, ImageCapabilities, ImageProtocol, ImageSurface,

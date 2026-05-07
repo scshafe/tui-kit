@@ -9,6 +9,8 @@ use std::fmt;
 use ratatui::{buffer::Buffer, layout::Rect};
 use serde::{Deserialize, Serialize};
 
+use crate::focus::FocusNode;
+
 /// Stable identifier for a component instance.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub struct ComponentId(String);
@@ -38,18 +40,6 @@ impl From<String> for ComponentId {
 impl fmt::Display for ComponentId {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(&self.0)
-    }
-}
-
-/// Stable identifier for a focusable node owned by a component.
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
-pub struct FocusNode {
-    pub id: String,
-}
-
-impl FocusNode {
-    pub fn new(id: impl Into<String>) -> Self {
-        Self { id: id.into() }
     }
 }
 

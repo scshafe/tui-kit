@@ -21,6 +21,7 @@ pub mod bar;
 pub mod component;
 pub mod config;
 pub mod events;
+pub mod focus;
 pub mod image;
 pub mod input;
 pub mod input_thread;
