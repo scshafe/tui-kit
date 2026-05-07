@@ -6,7 +6,10 @@
 
 pub use crate::bar::{Segment, SegmentBar, SegmentSlot, StatusFragment};
 pub use crate::config::{ConfigError, KitConfig, Validate};
-pub use crate::events::{AppEvent, AppEventReceiver, AppEventSender};
+pub use crate::events::{
+    AppEvent, AppEventReceiver, AppEventSender, InputEvent, RuntimeEvent, SchedulerEvent,
+    TerminalEvent, WatcherEvent,
+};
 pub use crate::image::{
     picker_placement_id, ImageBackendPreference, ImageCapabilities, ImageProtocol, ImageSurface,
     ImageSurfaceRegistry, KittyImageRegistry, NoopImageSurface, PlaceOptions, TransparencySupport,

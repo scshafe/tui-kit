@@ -1,5 +1,5 @@
 //! Keyboard and mouse abstraction. [`Key`] is the unified input enum
-//! delivered to applications via [`crate::events::AppEvent::Key`].
+//! delivered to applications via [`crate::events::InputEvent::Key`].
 //!
 //! [`read_key`] blocks on the next crossterm event and translates it.
 //! Designed to be called from the dedicated input thread spawned by

@@ -7,8 +7,8 @@
 //! are silently dropped).
 //!
 //! Completions are buffered internally; the application drains them with
-//! [`Scheduler::drain`] after receiving an [`crate::events::AppEvent::SchedulerComplete`]
-//! wake-up.
+//! [`Scheduler::drain`] after receiving an [`crate::events::AppEvent::Scheduler`]
+//! event carrying [`crate::events::SchedulerEvent::Complete`].
 
 use crate::events::{AppEvent, AppEventSender};
 use anyhow::Result;
@@ -237,7 +237,7 @@ fn worker_loop<Item: Send + 'static, Out: Send + 'static>(inner: Arc<SchedulerIn
                 });
             }
         }
-        let _ = inner.sink.send(AppEvent::SchedulerComplete);
+        let _ = inner.sink.send(AppEvent::scheduler_complete());
     }
 }
 

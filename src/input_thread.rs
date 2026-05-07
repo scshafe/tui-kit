@@ -10,12 +10,12 @@ pub fn spawn(sink: AppEventSender) -> thread::JoinHandle<()> {
     thread::spawn(move || loop {
         match read_key() {
             Ok(Key::Resize { cols, rows }) => {
-                if sink.send(AppEvent::Resize { cols, rows }).is_err() {
+                if sink.send(AppEvent::terminal_resize(cols, rows)).is_err() {
                     return;
                 }
             }
             Ok(key) => {
-                if sink.send(AppEvent::Key(key)).is_err() {
+                if sink.send(AppEvent::input_key(key)).is_err() {
                     return;
                 }
             }

@@ -10,16 +10,16 @@ Early. Extracted from [c4tui](https://github.com/scshafe/c4tui) as the reusable 
 
 | Module | Provides |
 |---|---|
-| `events` | `AppEvent` enum + unified channel: keys, render-completion, file-change, resize, ticks |
+| `events` | Typed `AppEvent<UserEvent>` categories + unified channel: input, terminal, scheduler, watcher, runtime/user events |
 | `input` | `Key` enum mapped from crossterm events |
-| `input_thread` | Detached input thread that pushes `AppEvent::Key`/`Resize` into the unified channel |
+| `input_thread` | Detached input thread that pushes `InputEvent::Key` and `TerminalEvent::Resize` into the unified channel |
 | `keymap` | `KeyMap` registry with `KeyTrigger → Command<C>` declarative bindings, last-binding-wins |
 | `tty` | `terminal_metrics()` reading both cell and pixel dimensions via TIOCGWINSZ |
 | `image` | `KittyImageRegistry` + `ImageSurface` trait — transmit-once-place-many image lifecycle |
 | `layout` | `PixelSize`, `CellSize`, `CanvasMetrics`, `ViewTransform`, `Placement` — fit/zoom/pan math |
 | `bar` | `Segment` trait + `SegmentBar` registry — slot-aligned, priority-truncated text bars |
 | `scheduler` | Priority-queue task scheduler with epoch-based cancellation |
-| `watcher` | notify-based file watcher with debounce, emits `AppEvent::WorkspaceChanged` |
+| `watcher` | notify-based file watcher with debounce, emits `WatcherEvent::WorkspaceChanged` |
 | `widgets::picker` | Generic list-with-detail-and-thumbnails picker, fuzzy filter, scrollable, selection highlight |
 | `widgets::dialog` | Modal with title, message, footer hint |
 | `terminal` | `Terminal` wrapping `ratatui::Terminal<CrosstermBackend>` + image registry + raw-mode lifecycle |

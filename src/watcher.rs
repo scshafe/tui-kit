@@ -69,7 +69,7 @@ fn debounce_loop(
                 pending = Some(Instant::now() + debounce);
             }
             None => {
-                if sink.send(AppEvent::WorkspaceChanged).is_err() {
+                if sink.send(AppEvent::workspace_changed()).is_err() {
                     return;
                 }
                 pending = None;

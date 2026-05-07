@@ -349,7 +349,7 @@ impl KittyImageRegistry {
 
     /// Drop-time cleanup. Emits a global delete-all-with-data so we leave
     /// the terminal in a clean state. Don't call mid-session — use
-    /// [`forget_all`] if you want to reset images cleanly.
+    /// [`ImageSurface::forget_all`] if you want to reset images cleanly.
     pub fn shutdown(&mut self) {
         let _ = write_stdout_all(b"\x1b_Ga=d,d=A,q=2;\x1b\\");
     }
