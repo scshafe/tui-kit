@@ -30,7 +30,9 @@ pub use crate::layout::{
     ImageZoomLimitPolicy, PixelRect, PixelSize, Placement, PlacementAnchor, PlacementEngine,
     PlacementPolicy, ViewTransform, MAX_SCALE, MIN_SCALE,
 };
-pub use crate::scheduler::{Completion, Priority, Progress, Scheduler};
+pub use crate::scheduler::{
+    CancellationReport, Completion, Priority, Progress, RequestScope, Scheduler, SchedulerStats,
+};
 pub use crate::terminal::{Terminal, TerminalConfig};
 pub use crate::tick::{
     spawn as spawn_tick_source, MissedTickPolicy, TickConfig, TickHandle, TickSourceId,
