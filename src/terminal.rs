@@ -16,15 +16,57 @@
 //! capture, restores cursor visibility, exits raw mode, and emits a
 //! selected image backend cleanup so no image placements leak.
 
+use crate::config::{ConfigError, Validate};
 use crate::image::{ImageBackendPreference, ImageSurfaceRegistry};
 use crate::layout::CanvasMetrics;
 use crate::tty::terminal_metrics;
 use anyhow::Result;
 use ratatui::backend::CrosstermBackend;
 use ratatui::Frame;
+use serde::{Deserialize, Serialize};
 use std::io::{self, Stdout};
 
 type Inner = ratatui::Terminal<CrosstermBackend<Stdout>>;
+
+/// Explicit runtime policy for entering a live terminal session.
+///
+/// Use named constructors instead of invisible defaults so applications and
+/// agents can choose image behavior deliberately before raw mode or the
+/// alternate screen are enabled.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TerminalConfig {
+    pub image_backend: ImageBackendPreference,
+}
+
+impl TerminalConfig {
+    /// Strict near-term runtime for Kitty-compatible terminals, including
+    /// WezTerm's Kitty graphics support.
+    pub fn strict_wezterm_kitty() -> Self {
+        Self {
+            image_backend: ImageBackendPreference::strict_kitty(),
+        }
+    }
+
+    /// Explicit no-image mode for tests or degraded terminals.
+    pub fn degraded_no_images() -> Self {
+        Self {
+            image_backend: ImageBackendPreference::degraded_no_images(),
+        }
+    }
+
+    /// Headless/inert test preset. This validates like degraded mode and is
+    /// intended for code paths that need a terminal-shaped config without
+    /// assuming image support.
+    pub fn headless_test() -> Self {
+        Self::degraded_no_images()
+    }
+}
+
+impl Validate for TerminalConfig {
+    fn validate(&self) -> Result<(), ConfigError> {
+        self.image_backend.validate()
+    }
+}
 
 pub struct Terminal {
     inner: Option<Inner>,
@@ -41,18 +83,19 @@ impl std::fmt::Debug for Terminal {
 
 impl Terminal {
     /// Enter raw mode, alt screen, mouse capture, and construct a
-    /// ratatui terminal with the default strict Kitty image backend.
+    /// ratatui terminal with the strict WezTerm/Kitty preset.
     /// Restored on drop.
     pub fn enter() -> Result<Self> {
-        Self::enter_with_image_backend(ImageBackendPreference::strict_kitty())
+        Self::enter_with_config(TerminalConfig::strict_wezterm_kitty())
     }
 
-    /// Enter raw mode with an explicit image backend preference.
+    /// Enter raw mode with an explicit terminal configuration.
     ///
     /// This keeps backend selection noisy and machine-readable: invalid or
     /// currently unimplemented protocols fail before terminal setup begins.
-    pub fn enter_with_image_backend(image_backend: ImageBackendPreference) -> Result<Self> {
-        let images = ImageSurfaceRegistry::from_preference(image_backend)?;
+    pub fn enter_with_config(config: TerminalConfig) -> Result<Self> {
+        config.validate()?;
+        let images = ImageSurfaceRegistry::from_preference(config.image_backend)?;
         crossterm::terminal::enable_raw_mode()?;
         let mut stdout = io::stdout();
         crossterm::execute!(
@@ -67,6 +110,11 @@ impl Terminal {
             inner: Some(inner),
             images,
         })
+    }
+
+    /// Enter raw mode with an explicit image backend preference.
+    pub fn enter_with_image_backend(image_backend: ImageBackendPreference) -> Result<Self> {
+        Self::enter_with_config(TerminalConfig { image_backend })
     }
 
     pub fn draw<F>(&mut self, f: F) -> Result<()>
@@ -102,5 +150,44 @@ impl Drop for Terminal {
             crossterm::terminal::LeaveAlternateScreen,
         );
         let _ = crossterm::terminal::disable_raw_mode();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::image::ImageProtocol;
+
+    #[test]
+    fn terminal_config_presets_are_explicit() {
+        let strict = TerminalConfig::strict_wezterm_kitty();
+        assert_eq!(strict.image_backend, ImageBackendPreference::KittyOnly);
+
+        let headless = TerminalConfig::headless_test();
+        assert_eq!(headless.image_backend, ImageBackendPreference::Disabled);
+    }
+
+    #[test]
+    fn terminal_config_validates_image_backend_policy() {
+        let error = TerminalConfig {
+            image_backend: ImageBackendPreference::AutoDetect { order: vec![] },
+        }
+        .validate()
+        .unwrap_err();
+
+        assert_eq!(error.path, "image.backend.order");
+    }
+
+    #[test]
+    fn terminal_config_rejects_noop_as_detectable_protocol() {
+        let error = TerminalConfig {
+            image_backend: ImageBackendPreference::AutoDetect {
+                order: vec![ImageProtocol::Noop],
+            },
+        }
+        .validate()
+        .unwrap_err();
+
+        assert_eq!(error.path, "image.backend.order");
     }
 }

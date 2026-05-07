@@ -21,7 +21,7 @@ pub use crate::layout::{
     PlacementPolicy, ViewTransform, MAX_SCALE, MIN_SCALE,
 };
 pub use crate::scheduler::{Completion, Priority, Progress, Scheduler};
-pub use crate::terminal::Terminal;
+pub use crate::terminal::{Terminal, TerminalConfig};
 pub use crate::tty::{stdin_is_terminal, stdout_is_terminal, terminal_metrics, write_stdout_all};
 pub use crate::watcher::WorkspaceWatcher;
 pub use crate::widgets::dialog::Dialog;
