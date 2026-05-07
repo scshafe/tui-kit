@@ -55,9 +55,11 @@ impl<Item: Send + 'static, Out: Send + 'static> std::fmt::Debug for Scheduler<It
 struct SchedulerInner<Item, Out> {
     state: Mutex<SchedulerState<Item, Out>>,
     cv: Condvar,
-    executor: Box<dyn Fn(&Item) -> Result<Out> + Send + Sync>,
+    executor: WorkExecutor<Item, Out>,
     sink: AppEventSender,
 }
+
+type WorkExecutor<Item, Out> = Box<dyn Fn(&Item) -> Result<Out> + Send + Sync>;
 
 struct SchedulerState<Item, Out> {
     queue: BinaryHeap<PrioritizedRequest<Item>>,

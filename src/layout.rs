@@ -1,5 +1,6 @@
 #![allow(dead_code)]
 
+use crate::config::{ConfigError, Validate};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -122,6 +123,128 @@ pub const MIN_SCALE: f32 = 0.1;
 pub const MAX_SCALE: f32 = 16.0;
 pub const DEFAULT_CENTER: f32 = 0.5;
 
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[non_exhaustive]
+pub enum ImageZoomLimitPolicy {
+    ClampScale { min: f32, max: f32 },
+    ClampAtFitBounds,
+    AllowUnboundedWithinProtocol,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[non_exhaustive]
+pub enum ImageOverflowPolicy {
+    FitWithinArea,
+    CropSourceToArea,
+    OverflowAndClipDestination,
+    PreventZoomBeyondArea,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[non_exhaustive]
+pub enum ImageScaleBasis {
+    NativePixels,
+    FitToArea,
+    FillArea,
+    ExplicitScale(f32),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[non_exhaustive]
+pub enum ImageAnchorPolicy {
+    Center,
+    PreserveCursorAnchor,
+    PreserveImagePoint { x: f32, y: f32 },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[non_exhaustive]
+pub enum CellRoundingPolicy {
+    Nearest,
+    Floor,
+    Ceil,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PlacementPolicy {
+    pub scale_basis: ImageScaleBasis,
+    pub zoom_limit: ImageZoomLimitPolicy,
+    pub overflow: ImageOverflowPolicy,
+    pub anchor: ImageAnchorPolicy,
+    pub min_visible_pixels: PixelSize,
+    pub cell_rounding: CellRoundingPolicy,
+}
+
+impl PlacementPolicy {
+    pub const fn crop_fit_centered() -> Self {
+        Self {
+            scale_basis: ImageScaleBasis::FitToArea,
+            zoom_limit: ImageZoomLimitPolicy::ClampScale {
+                min: MIN_SCALE,
+                max: MAX_SCALE,
+            },
+            overflow: ImageOverflowPolicy::CropSourceToArea,
+            anchor: ImageAnchorPolicy::Center,
+            min_visible_pixels: PixelSize::new(1, 1),
+            cell_rounding: CellRoundingPolicy::Nearest,
+        }
+    }
+}
+
+impl Validate for PlacementPolicy {
+    fn validate(&self) -> Result<(), ConfigError> {
+        if self.min_visible_pixels.width == 0 || self.min_visible_pixels.height == 0 {
+            return Err(ConfigError::new(
+                "PlacementPolicy.min_visible_pixels",
+                "width and height must both be non-zero",
+            ));
+        }
+        if let ImageScaleBasis::ExplicitScale(scale) = self.scale_basis {
+            validate_positive_finite("PlacementPolicy.scale_basis", scale)?;
+        }
+        if let ImageZoomLimitPolicy::ClampScale { min, max } = self.zoom_limit {
+            validate_positive_finite("PlacementPolicy.zoom_limit.min", min)?;
+            validate_positive_finite("PlacementPolicy.zoom_limit.max", max)?;
+            if min > max {
+                return Err(ConfigError::new(
+                    "PlacementPolicy.zoom_limit",
+                    "min must be less than or equal to max",
+                ));
+            }
+        }
+        if let ImageAnchorPolicy::PreserveImagePoint { x, y } = self.anchor {
+            if !x.is_finite() || !y.is_finite() {
+                return Err(ConfigError::new(
+                    "PlacementPolicy.anchor",
+                    "image point coordinates must be finite",
+                ));
+            }
+        }
+        Ok(())
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct PlacementEngine {
+    policy: PlacementPolicy,
+}
+
+impl PlacementEngine {
+    pub fn new(policy: PlacementPolicy) -> Result<Self, ConfigError> {
+        policy.validate()?;
+        Ok(Self { policy })
+    }
+
+    pub fn place(
+        &self,
+        image: PixelSize,
+        canvas: CanvasMetrics,
+        transform: ViewTransform,
+    ) -> Placement {
+        place_with_policy(image, canvas, transform, &self.policy)
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct ViewTransform {
     pub scale: f32,
@@ -152,61 +275,9 @@ impl ViewTransform {
     }
 
     pub fn place(self, image: PixelSize, canvas: CanvasMetrics) -> Placement {
-        let canvas_pixels = canvas.pixels();
-        let cell_pixel = canvas.cell_pixel.or_fallback();
-        let fit = fit_scale(image, canvas_pixels);
-        let scale = clamp_scale(self.scale);
-        let effective = (fit * scale).max(f32::EPSILON);
-
-        let display_w = image.width as f32 * effective;
-        let display_h = image.height as f32 * effective;
-        let visible_w = display_w.min(canvas_pixels.width as f32).max(1.0);
-        let visible_h = display_h.min(canvas_pixels.height as f32).max(1.0);
-
-        let src_w = ((visible_w / effective).round() as u32).clamp(1, image.width.max(1));
-        let src_h = ((visible_h / effective).round() as u32).clamp(1, image.height.max(1));
-        let max_x = image.width.saturating_sub(src_w);
-        let max_y = image.height.saturating_sub(src_h);
-
-        let center_x = self.center_x.clamp(0.0, 1.0);
-        let center_y = self.center_y.clamp(0.0, 1.0);
-        let center_image_x = center_x * image.width as f32;
-        let center_image_y = center_y * image.height as f32;
-        let src_x = (center_image_x - src_w as f32 / 2.0)
-            .round()
-            .max(0.0)
-            .min(max_x as f32) as u32;
-        let src_y = (center_image_y - src_h as f32 / 2.0)
-            .round()
-            .max(0.0)
-            .min(max_y as f32) as u32;
-
-        let cell_w = cell_pixel.width.max(1) as f32;
-        let cell_h = cell_pixel.height.max(1) as f32;
-        let target_cols = ((visible_w / cell_w).round() as u16).clamp(1, canvas.cells.cols.max(1));
-        let target_rows = ((visible_h / cell_h).round() as u16).clamp(1, canvas.cells.rows.max(1));
-
-        let origin_col = canvas.cells.cols.saturating_sub(target_cols) / 2;
-        let origin_row = canvas.cells.rows.saturating_sub(target_rows) / 2;
-
-        Placement {
-            source: PixelRect {
-                x: src_x,
-                y: src_y,
-                width: src_w,
-                height: src_h,
-            },
-            size: CellRect {
-                cols: target_cols,
-                rows: target_rows,
-            },
-            origin: CellOffset {
-                col: origin_col,
-                row: origin_row,
-            },
-            effective_scale: effective,
-            fit_scale: fit,
-        }
+        PlacementEngine::new(PlacementPolicy::crop_fit_centered())
+            .expect("built-in placement policy is valid")
+            .place(image, canvas, self)
     }
 
     pub fn zoomed_at(
@@ -325,6 +396,157 @@ impl ViewTransform {
     }
 }
 
+fn place_with_policy(
+    image: PixelSize,
+    canvas: CanvasMetrics,
+    transform: ViewTransform,
+    policy: &PlacementPolicy,
+) -> Placement {
+    let canvas_pixels = canvas.pixels();
+    let cell_pixel = canvas.cell_pixel.or_fallback();
+    let fit = fit_scale(image, canvas_pixels);
+    let base = scale_basis(policy.scale_basis, image, canvas_pixels, fit);
+    let scale = apply_zoom_limit(transform.scale, policy.zoom_limit, fit);
+    let mut effective = (base * scale).max(f32::EPSILON);
+
+    if matches!(
+        policy.overflow,
+        ImageOverflowPolicy::FitWithinArea | ImageOverflowPolicy::PreventZoomBeyondArea
+    ) {
+        effective = effective.min(fit).max(f32::EPSILON);
+    }
+
+    let display_w = image.width as f32 * effective;
+    let display_h = image.height as f32 * effective;
+    let max_visible_w = match policy.overflow {
+        ImageOverflowPolicy::OverflowAndClipDestination => display_w,
+        _ => display_w.min(canvas_pixels.width as f32),
+    };
+    let max_visible_h = match policy.overflow {
+        ImageOverflowPolicy::OverflowAndClipDestination => display_h,
+        _ => display_h.min(canvas_pixels.height as f32),
+    };
+    let visible_w = max_visible_w.max(policy.min_visible_pixels.width as f32);
+    let visible_h = max_visible_h.max(policy.min_visible_pixels.height as f32);
+
+    let (src_w, src_h) = match policy.overflow {
+        ImageOverflowPolicy::FitWithinArea
+        | ImageOverflowPolicy::OverflowAndClipDestination
+        | ImageOverflowPolicy::PreventZoomBeyondArea => (image.width.max(1), image.height.max(1)),
+        ImageOverflowPolicy::CropSourceToArea => (
+            ((visible_w / effective).round() as u32).clamp(1, image.width.max(1)),
+            ((visible_h / effective).round() as u32).clamp(1, image.height.max(1)),
+        ),
+    };
+    let max_x = image.width.saturating_sub(src_w);
+    let max_y = image.height.saturating_sub(src_h);
+
+    let (center_x, center_y) = match policy.anchor {
+        ImageAnchorPolicy::Center | ImageAnchorPolicy::PreserveCursorAnchor => {
+            (transform.center_x, transform.center_y)
+        }
+        ImageAnchorPolicy::PreserveImagePoint { x, y } => (
+            x / image.width.max(1) as f32,
+            y / image.height.max(1) as f32,
+        ),
+    };
+    let center_x = center_x.clamp(0.0, 1.0);
+    let center_y = center_y.clamp(0.0, 1.0);
+    let center_image_x = center_x * image.width as f32;
+    let center_image_y = center_y * image.height as f32;
+    let src_x = (center_image_x - src_w as f32 / 2.0)
+        .round()
+        .max(0.0)
+        .min(max_x as f32) as u32;
+    let src_y = (center_image_y - src_h as f32 / 2.0)
+        .round()
+        .max(0.0)
+        .min(max_y as f32) as u32;
+
+    let cell_w = cell_pixel.width.max(1) as f32;
+    let cell_h = cell_pixel.height.max(1) as f32;
+    let target_cols =
+        round_cells(visible_w / cell_w, policy.cell_rounding).clamp(1, canvas.cells.cols.max(1));
+    let target_rows =
+        round_cells(visible_h / cell_h, policy.cell_rounding).clamp(1, canvas.cells.rows.max(1));
+
+    let origin_col = canvas.cells.cols.saturating_sub(target_cols) / 2;
+    let origin_row = canvas.cells.rows.saturating_sub(target_rows) / 2;
+
+    Placement {
+        source: PixelRect {
+            x: src_x,
+            y: src_y,
+            width: src_w,
+            height: src_h,
+        },
+        size: CellRect {
+            cols: target_cols,
+            rows: target_rows,
+        },
+        origin: CellOffset {
+            col: origin_col,
+            row: origin_row,
+        },
+        effective_scale: effective,
+        fit_scale: fit,
+    }
+}
+
+fn scale_basis(
+    basis: ImageScaleBasis,
+    image: PixelSize,
+    canvas_pixels: PixelSize,
+    fit: f32,
+) -> f32 {
+    match basis {
+        ImageScaleBasis::NativePixels => 1.0,
+        ImageScaleBasis::FitToArea => fit,
+        ImageScaleBasis::FillArea => {
+            if image.width == 0 || image.height == 0 {
+                1.0
+            } else {
+                let fit_w = canvas_pixels.width.max(1) as f32 / image.width as f32;
+                let fit_h = canvas_pixels.height.max(1) as f32 / image.height as f32;
+                fit_w.max(fit_h).max(f32::EPSILON)
+            }
+        }
+        ImageScaleBasis::ExplicitScale(scale) => scale,
+    }
+}
+
+fn apply_zoom_limit(scale: f32, limit: ImageZoomLimitPolicy, fit: f32) -> f32 {
+    if scale.is_nan() {
+        return 1.0;
+    }
+    match limit {
+        ImageZoomLimitPolicy::ClampScale { min, max } => scale.clamp(min, max),
+        ImageZoomLimitPolicy::ClampAtFitBounds => {
+            scale.min(1.0 / fit.max(f32::EPSILON)).max(MIN_SCALE)
+        }
+        ImageZoomLimitPolicy::AllowUnboundedWithinProtocol => scale.max(f32::EPSILON),
+    }
+}
+
+fn round_cells(value: f32, policy: CellRoundingPolicy) -> u16 {
+    let rounded = match policy {
+        CellRoundingPolicy::Nearest => value.round(),
+        CellRoundingPolicy::Floor => value.floor(),
+        CellRoundingPolicy::Ceil => value.ceil(),
+    };
+    rounded.max(1.0).min(u16::MAX as f32) as u16
+}
+
+fn validate_positive_finite(path: &'static str, value: f32) -> Result<(), ConfigError> {
+    if !value.is_finite() || value <= 0.0 {
+        return Err(ConfigError::new(
+            path,
+            "value must be finite and greater than zero",
+        ));
+    }
+    Ok(())
+}
+
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct ImagePoint {
     pub x: f32,
@@ -392,6 +614,66 @@ mod tests {
         let zoomed = ViewTransform::fit().with_scale(2.0).place(image, canvas);
         assert!(zoomed.source.width < image.width);
         assert!(zoomed.source.height < image.height);
+    }
+
+    #[test]
+    fn placement_engine_uses_explicit_policy() {
+        let image = PixelSize::new(400, 200);
+        let canvas = canvas(50, 20);
+        let policy = PlacementPolicy {
+            scale_basis: ImageScaleBasis::NativePixels,
+            zoom_limit: ImageZoomLimitPolicy::ClampScale { min: 1.0, max: 4.0 },
+            overflow: ImageOverflowPolicy::OverflowAndClipDestination,
+            anchor: ImageAnchorPolicy::Center,
+            min_visible_pixels: PixelSize::new(1, 1),
+            cell_rounding: CellRoundingPolicy::Floor,
+        };
+        let placement = PlacementEngine::new(policy).unwrap().place(
+            image,
+            canvas,
+            ViewTransform::fit().with_scale(2.0),
+        );
+
+        assert_eq!(placement.source.width, image.width);
+        assert_eq!(placement.source.height, image.height);
+        assert_eq!(placement.effective_scale, 2.0);
+        assert_eq!(placement.size.cols, canvas.cells.cols);
+        assert_eq!(placement.size.rows, canvas.cells.rows);
+    }
+
+    #[test]
+    fn placement_policy_validation_is_machine_readable() {
+        let policy = PlacementPolicy {
+            scale_basis: ImageScaleBasis::ExplicitScale(f32::NAN),
+            zoom_limit: ImageZoomLimitPolicy::ClampScale { min: 2.0, max: 1.0 },
+            overflow: ImageOverflowPolicy::CropSourceToArea,
+            anchor: ImageAnchorPolicy::Center,
+            min_visible_pixels: PixelSize::new(0, 1),
+            cell_rounding: CellRoundingPolicy::Nearest,
+        };
+
+        let err = PlacementEngine::new(policy).unwrap_err();
+        assert_eq!(err.path, "PlacementPolicy.min_visible_pixels");
+    }
+
+    #[test]
+    fn prevent_zoom_beyond_area_keeps_full_source_visible() {
+        let image = PixelSize::new(1000, 800);
+        let canvas = canvas(100, 50);
+        let policy = PlacementPolicy {
+            overflow: ImageOverflowPolicy::PreventZoomBeyondArea,
+            ..PlacementPolicy::crop_fit_centered()
+        };
+        let placement = PlacementEngine::new(policy).unwrap().place(
+            image,
+            canvas,
+            ViewTransform::fit().with_scale(4.0),
+        );
+
+        assert_eq!(placement.source.width, image.width);
+        assert_eq!(placement.source.height, image.height);
+        assert!(placement.size.cols <= canvas.cells.cols);
+        assert!(placement.size.rows <= canvas.cells.rows);
     }
 
     #[test]
