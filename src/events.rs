@@ -12,6 +12,7 @@
 //! top-level event enum become an unstructured junk drawer.
 
 use crate::input::Key;
+use crate::tick::TickSourceId;
 use std::convert::Infallible;
 use std::sync::mpsc::{Receiver, Sender};
 
@@ -23,6 +24,7 @@ pub enum AppEvent<UserEvent = Infallible> {
     Runtime(RuntimeEvent),
     Scheduler(SchedulerEvent),
     Watcher(WatcherEvent),
+    Tick(TickEvent),
     User(UserEvent),
 }
 
@@ -56,6 +58,12 @@ pub enum WatcherEvent {
     WorkspaceChanged,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum TickEvent {
+    Tick { id: TickSourceId },
+}
+
 impl<UserEvent> AppEvent<UserEvent> {
     pub fn input_key(key: Key) -> Self {
         Self::Input(InputEvent::Key(key))
@@ -75,6 +83,10 @@ impl<UserEvent> AppEvent<UserEvent> {
 
     pub fn heartbeat() -> Self {
         Self::Runtime(RuntimeEvent::Heartbeat)
+    }
+
+    pub fn tick(id: TickSourceId) -> Self {
+        Self::Tick(TickEvent::Tick { id })
     }
 }
 
@@ -106,6 +118,12 @@ mod tests {
         assert_eq!(
             AppEvent::<Infallible>::heartbeat(),
             AppEvent::Runtime(RuntimeEvent::Heartbeat)
+        );
+        assert_eq!(
+            AppEvent::<Infallible>::tick(TickSourceId::new("ui").unwrap()),
+            AppEvent::Tick(TickEvent::Tick {
+                id: TickSourceId::new("ui").unwrap()
+            })
         );
     }
 

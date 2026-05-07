@@ -1,7 +1,7 @@
 //! tui-kit — opinionated middleware for terminal UI applications.
 //!
 //! Sits on top of [`ratatui`] and [`crossterm`]. Provides:
-//! - Unified [`events`] channel + producers (input, watcher, scheduler).
+//! - Unified [`events`] channel + producers (input, watcher, scheduler, ticks).
 //! - Declarative [`keymap`] registry.
 //! - Cell + pixel [`tty`] metrics.
 //! - Image lifecycle via [`image`] surfaces.
@@ -27,6 +27,7 @@ pub mod layout;
 pub mod prelude;
 pub mod scheduler;
 pub mod terminal;
+pub mod tick;
 pub mod tty;
 pub mod watcher;
 pub mod widgets;
