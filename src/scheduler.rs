@@ -284,8 +284,7 @@ mod tests {
     #[test]
     fn scheduler_executes_and_returns_completions() {
         let (tx, rx) = mpsc::channel();
-        let mut sched: Scheduler<i32, i32> =
-            Scheduler::new(1, tx, |item: &i32| Ok(item * 2));
+        let mut sched: Scheduler<i32, i32> = Scheduler::new(1, tx, |item: &i32| Ok(item * 2));
         sched.request(1, Priority::Active, 21);
         // wait for completion event
         let _ = rx.recv_timeout(Duration::from_secs(1)).unwrap();

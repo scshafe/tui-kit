@@ -183,10 +183,8 @@ impl ViewTransform {
 
         let cell_w = cell_pixel.width.max(1) as f32;
         let cell_h = cell_pixel.height.max(1) as f32;
-        let target_cols = ((visible_w / cell_w).round() as u16)
-            .clamp(1, canvas.cells.cols.max(1));
-        let target_rows = ((visible_h / cell_h).round() as u16)
-            .clamp(1, canvas.cells.rows.max(1));
+        let target_cols = ((visible_w / cell_w).round() as u16).clamp(1, canvas.cells.cols.max(1));
+        let target_rows = ((visible_h / cell_h).round() as u16).clamp(1, canvas.cells.rows.max(1));
 
         let origin_col = canvas.cells.cols.saturating_sub(target_cols) / 2;
         let origin_row = canvas.cells.rows.saturating_sub(target_rows) / 2;
@@ -229,7 +227,13 @@ impl ViewTransform {
             center_x: self.center_x,
             center_y: self.center_y,
         };
-        pivoted.recenter_so_anchor_stays(anchor_image, anchor_canvas_x, anchor_canvas_y, image, canvas)
+        pivoted.recenter_so_anchor_stays(
+            anchor_image,
+            anchor_canvas_x,
+            anchor_canvas_y,
+            image,
+            canvas,
+        )
     }
 
     pub fn panned(
@@ -356,7 +360,15 @@ mod tests {
     fn fit_scale_centers_image_smaller_than_canvas() {
         let image = PixelSize::new(400, 200);
         let placement = ViewTransform::fit().place(image, canvas(200, 50));
-        assert_eq!(placement.source, PixelRect { x: 0, y: 0, width: 400, height: 200 });
+        assert_eq!(
+            placement.source,
+            PixelRect {
+                x: 0,
+                y: 0,
+                width: 400,
+                height: 200
+            }
+        );
         assert!(placement.size.cols <= 200 && placement.size.rows <= 50);
         assert!(placement.origin.col + placement.size.cols <= 200);
     }
@@ -420,7 +432,9 @@ mod tests {
         let canvas = canvas(200, 50);
         let placement = ViewTransform::fit().with_scale(0.5).place(image, canvas);
         assert!(placement.origin.col > 0 || placement.origin.row > 0);
-        let p = ViewTransform::fit().with_scale(0.5).canvas_to_image(0.0, 0.0, image, canvas);
+        let p = ViewTransform::fit()
+            .with_scale(0.5)
+            .canvas_to_image(0.0, 0.0, image, canvas);
         assert!(!p.inside);
     }
 

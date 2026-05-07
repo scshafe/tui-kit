@@ -68,6 +68,10 @@ impl<C: Clone> KeyMap<C> {
     pub fn bindings(&self) -> &[KeyBinding<C>] {
         &self.bindings
     }
+
+    pub fn is_empty(&self) -> bool {
+        self.bindings.is_empty()
+    }
 }
 
 impl KeyTrigger {

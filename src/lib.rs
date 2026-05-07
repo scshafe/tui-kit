@@ -17,6 +17,7 @@
 #![warn(missing_debug_implementations)]
 
 pub mod bar;
+pub mod config;
 pub mod events;
 pub mod image;
 pub mod input;

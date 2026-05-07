@@ -13,6 +13,7 @@
 //!
 //! See `c4tui::picker` for the application-side wiring.
 
+use crate::config::{ConfigError, Validate};
 use crate::input::Key;
 use crate::keymap::{KeyMap, KeyTrigger, SpecialKey};
 use ratatui::buffer::Buffer;
@@ -71,6 +72,12 @@ impl PickerConfig {
         }
     }
 
+    pub fn try_explicit(actions: KeyMap<PickerAction>) -> Result<Self, ConfigError> {
+        let config = Self::explicit(actions);
+        config.validate()?;
+        Ok(config)
+    }
+
     pub fn default_navigation() -> Self {
         let mut actions = KeyMap::new();
         actions
@@ -90,6 +97,59 @@ impl PickerConfig {
                 PickerAction::BackspaceFilter,
             );
         Self::explicit(actions)
+    }
+}
+
+impl Validate for PickerConfig {
+    fn validate(&self) -> Result<(), ConfigError> {
+        if self.item_row_span == 0 {
+            return Err(ConfigError::new(
+                "PickerConfig.item_row_span",
+                "must be greater than zero",
+            ));
+        }
+        if self.allow_thumbnails && self.thumb_cols == 0 {
+            return Err(ConfigError::new(
+                "PickerConfig.thumb_cols",
+                "must be greater than zero when thumbnails are enabled",
+            ));
+        }
+        if self.allow_thumbnails && self.thumb_rows == 0 {
+            return Err(ConfigError::new(
+                "PickerConfig.thumb_rows",
+                "must be greater than zero when thumbnails are enabled",
+            ));
+        }
+        if self.actions.is_empty() {
+            return Err(ConfigError::new(
+                "PickerConfig.actions",
+                "must install an explicit key policy; use PickerConfig::default_navigation() for the built-in preset",
+            ));
+        }
+        for binding in self.actions.bindings() {
+            match &binding.command {
+                PickerAction::ToggleGroup { group } if group.trim().is_empty() => {
+                    return Err(ConfigError::new(
+                        "PickerConfig.actions[].ToggleGroup.group",
+                        "must not be empty",
+                    ));
+                }
+                PickerAction::Custom(name) if name.trim().is_empty() => {
+                    return Err(ConfigError::new(
+                        "PickerConfig.actions[].Custom",
+                        "must not be empty",
+                    ));
+                }
+                PickerAction::AppendFilterChar(c) if c.is_control() => {
+                    return Err(ConfigError::new(
+                        "PickerConfig.actions[].AppendFilterChar",
+                        "must not bind control characters into the filter",
+                    ));
+                }
+                _ => {}
+            }
+        }
+        Ok(())
     }
 }
 
@@ -120,20 +180,30 @@ pub enum PickerOutcome {
 
 impl<T: Clone> Picker<T> {
     pub fn new(items: Vec<PickerItem<T>>, config: PickerConfig, initial_selection: u64) -> Self {
+        Self::try_new(items, config, initial_selection)
+            .unwrap_or_else(|err| panic!("invalid PickerConfig: {err}"))
+    }
+
+    pub fn try_new(
+        items: Vec<PickerItem<T>>,
+        config: PickerConfig,
+        initial_selection: u64,
+    ) -> Result<Self, ConfigError> {
+        config.validate()?;
         let mut group_order: Vec<Option<String>> = Vec::new();
         for item in &items {
             if !group_order.contains(&item.group) {
                 group_order.push(item.group.clone());
             }
         }
-        Self {
+        Ok(Self {
             items,
             config,
             filter: String::new(),
             hidden_groups: HashSet::new(),
             selected_id: initial_selection,
             group_order,
-        }
+        })
     }
 
     pub fn config(&self) -> &PickerConfig {
@@ -615,6 +685,46 @@ mod tests {
             PickerConfig::default(),
             0,
         )
+    }
+
+    #[test]
+    fn picker_config_requires_explicit_key_policy() {
+        let err = PickerConfig::explicit(KeyMap::new())
+            .validate()
+            .unwrap_err();
+        assert_eq!(err.path, "PickerConfig.actions");
+    }
+
+    #[test]
+    fn picker_config_rejects_zero_thumbnail_dimensions_when_enabled() {
+        let mut cfg = PickerConfig::default_navigation();
+        cfg.thumb_rows = 0;
+        let err = cfg.validate().unwrap_err();
+        assert_eq!(err.path, "PickerConfig.thumb_rows");
+    }
+
+    #[test]
+    fn picker_config_rejects_empty_action_payloads() {
+        let mut actions = KeyMap::new();
+        actions.bind(
+            KeyTrigger::Special(SpecialKey::Tab),
+            PickerAction::ToggleGroup {
+                group: " ".to_owned(),
+            },
+        );
+        let err = PickerConfig::explicit(actions).validate().unwrap_err();
+        assert_eq!(err.path, "PickerConfig.actions[].ToggleGroup.group");
+    }
+
+    #[test]
+    fn try_new_returns_config_errors_without_panicking() {
+        let err = Picker::try_new(
+            vec![item(0, "Apple", None)],
+            PickerConfig::explicit(KeyMap::new()),
+            0,
+        )
+        .unwrap_err();
+        assert_eq!(err.path, "PickerConfig.actions");
     }
 
     #[test]

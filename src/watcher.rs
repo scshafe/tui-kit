@@ -36,8 +36,7 @@ impl WorkspaceWatcher {
                 .watch(target, RecursiveMode::NonRecursive)
                 .with_context(|| format!("failed to watch {}", target.display()))?;
         }
-        let owned_paths: Vec<std::path::PathBuf> =
-            paths.iter().map(|p| p.to_path_buf()).collect();
+        let owned_paths: Vec<std::path::PathBuf> = paths.iter().map(|p| p.to_path_buf()).collect();
         thread::spawn(move || debounce_loop(raw_rx, sink, owned_paths, debounce));
         Ok(Self { _watcher: watcher })
     }
@@ -52,11 +51,13 @@ fn debounce_loop(
     let mut pending: Option<Instant> = None;
     loop {
         let event = match pending {
-            Some(deadline) => match raw_rx.recv_timeout(deadline.saturating_duration_since(Instant::now())) {
-                Ok(event) => Some(event),
-                Err(std_mpsc::RecvTimeoutError::Timeout) => None,
-                Err(std_mpsc::RecvTimeoutError::Disconnected) => return,
-            },
+            Some(deadline) => {
+                match raw_rx.recv_timeout(deadline.saturating_duration_since(Instant::now())) {
+                    Ok(event) => Some(event),
+                    Err(std_mpsc::RecvTimeoutError::Timeout) => None,
+                    Err(std_mpsc::RecvTimeoutError::Disconnected) => return,
+                }
+            }
             None => match raw_rx.recv() {
                 Ok(event) => Some(event),
                 Err(_) => return,
