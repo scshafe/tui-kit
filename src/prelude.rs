@@ -1,0 +1,28 @@
+//! Common imports for tui-kit consumers.
+//!
+//! ```ignore
+//! use tui_kit::prelude::*;
+//! ```
+
+pub use crate::bar::{Segment, SegmentBar, SegmentSlot, StatusFragment};
+pub use crate::events::{AppEvent, AppEventReceiver, AppEventSender};
+pub use crate::image::{
+    picker_placement_id, ImageSurface, KittyImageRegistry, PlaceOptions, MAIN_PLACEMENT_ID,
+    PICKER_PLACEMENT_ID_BASE,
+};
+pub use crate::input::Key;
+pub use crate::keymap::{KeyBinding, KeyMap, KeyTrigger, SpecialKey};
+pub use crate::layout::{
+    fit_scale, CanvasMetrics, CellOffset, CellPixel, CellRect, CellSize, ImagePoint, Placement,
+    PixelRect, PixelSize, ViewTransform, MAX_SCALE, MIN_SCALE,
+};
+pub use crate::scheduler::{Completion, Priority, Progress, Scheduler};
+pub use crate::terminal::Terminal;
+pub use crate::tty::{
+    stdin_is_terminal, stdout_is_terminal, terminal_metrics, write_stdout_all,
+};
+pub use crate::watcher::WorkspaceWatcher;
+pub use crate::widgets::dialog::Dialog;
+pub use crate::widgets::picker::{
+    Picker, PickerConfig, PickerItem, PickerOutcome, PickerWidget, ThumbnailRequest,
+};

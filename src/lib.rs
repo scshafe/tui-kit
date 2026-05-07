@@ -6,8 +6,13 @@
 //! - Cell + pixel [`tty`] metrics.
 //! - Image lifecycle via [`image`] surfaces.
 //! - Generic placement / fit / pan / zoom math in [`layout`].
+//! - Slot-aligned, priority-truncated text bars in [`bar`].
+//! - Priority-queue [`scheduler`] for async work.
+//! - File [`watcher`] integration.
+//! - Composed [`widgets`] (picker, dialog) and a [`terminal`] session wrapper.
 //!
-//! See `PLAN.md` for module-by-module map and roadmap.
+//! See [`prelude`] for the most common imports. See `PLAN.md` in the repo
+//! for the module-by-module map and roadmap.
 
 #![warn(missing_debug_implementations)]
 
@@ -18,6 +23,9 @@ pub mod input;
 pub mod input_thread;
 pub mod keymap;
 pub mod layout;
+pub mod prelude;
 pub mod scheduler;
+pub mod terminal;
 pub mod tty;
 pub mod watcher;
+pub mod widgets;
