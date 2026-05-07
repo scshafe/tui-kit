@@ -121,3 +121,55 @@ Keeps:
 Updated as work progresses.
 
 - 2026-05-06: PLAN.md created. Workspace setup begun.
+- 2026-05-06: Phases 1–3 of the extraction landed in three commits.
+  - Phase 1 commit `feat: foundational modules — events, input, keymap, tty, image, layout` (16 tests).
+  - Phase 2 commit `feat: layout, bar, scheduler, watcher` (21 tests cumulative).
+  - Phase 3 commit `feat: terminal session, picker, dialog widgets, prelude` (26 tests cumulative).
+  - All three pushed to `main` on github.com/scshafe/tui-kit.
+- 2026-05-06: c4tui ported. Commit `refactor: port c4tui to be built on
+  top of tui-kit`. c4tui now `path = "../tui-kit"` deps; 52 tests pass
+  on the c4tui side, total ~78 tests across both crates. Binary
+  reinstalled at ~/.cargo/bin/c4tui.
+
+## Status — what is and isn't done
+
+### Done
+
+- Workspace + crate skeleton with dual MIT/Apache-2.0 license.
+- All Phase 1, 2, 3 modules extracted, tested, documented.
+- c4tui ported end-to-end. Backwards-compatible behaviour confirmed
+  via test suite.
+- Both repos pushed to GitHub.
+
+### Not done (deliberately deferred)
+
+- **Component trait with dirty tracking + Cached wrapper.** This is the
+  high-leverage piece for the dashboard. Not needed for c4tui's port.
+  Will land when dashboard surfaces the pressure.
+- **Tick / data-subscription.** Same — dashboard work.
+- **Sixel + iTerm2 image surfaces.** User explicitly OK with Kitty-only
+  to start.
+- **Theme system.** Not blocking either app.
+- **Component-level focus management.** AppMode covers c4tui's needs;
+  revisit when there's nested-modal pressure.
+- **Test harness with MockTerminal.** Useful but not blocking.
+- **Plotter bridge widget for the dashboard.** Deferred until dashboard
+  lifts off.
+
+### Known follow-ups for tui-kit itself
+
+- `Picker::handle_key`'s Tab handler emits `PickerOutcome::ToggleHiddenGroup("default")`
+  with a placeholder name. Apps currently work around this by ignoring
+  the outcome and managing group visibility via `set_group_hidden`. Add
+  a configurable "primary toggle group" in `PickerConfig`.
+- `Scheduler::Priority` is a fixed three-level enum. If this ever
+  becomes limiting, generalise to `Priority<P: Ord>`.
+- `Terminal::translate_key` doesn't exist in the tui-kit `Terminal` —
+  apps do canvas-coord translation themselves. If a common pattern
+  emerges across apps, lift it.
+- `bar` doesn't ship any built-in segments. That's intentional but
+  apps will repeat boilerplate (AppNameSegment, etc.) — consider a
+  `bar::common` module of generic segments (clock, host, build hash).
+- Add CI: GitHub Actions running cargo test + clippy.
+- Add `cargo doc` polish; consider doc-test-driven examples.
+- Publish to crates.io once the API stabilises.
