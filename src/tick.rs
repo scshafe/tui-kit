@@ -245,11 +245,11 @@ mod tests {
     #[test]
     fn after_interval_tick_source_waits_before_first_tick() {
         let (tx, rx) = mpsc::channel();
-        let config = TickConfig::test_fast("slow", Duration::from_millis(20)).unwrap();
+        let config = TickConfig::test_fast("slow", Duration::from_secs(1)).unwrap();
 
         let handle = spawn(config, tx).unwrap();
-        assert!(rx.recv_timeout(Duration::from_millis(5)).is_err());
-        let event = rx.recv_timeout(Duration::from_secs(1)).unwrap();
+        assert!(rx.recv_timeout(Duration::from_millis(20)).is_err());
+        let event = rx.recv_timeout(Duration::from_secs(2)).unwrap();
         handle.stop();
 
         assert_eq!(
