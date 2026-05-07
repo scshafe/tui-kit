@@ -38,7 +38,10 @@ pub use crate::tick::{
 };
 pub use crate::tty::{stdin_is_terminal, stdout_is_terminal, terminal_metrics, write_stdout_all};
 pub use crate::watcher::WorkspaceWatcher;
-pub use crate::widgets::dialog::Dialog;
+pub use crate::widgets::dialog::{
+    Dialog, DialogAction, DialogConfig, DialogDismissPolicy, DialogFocusId, DialogFocusPolicy,
+    DialogOutcome, DialogState,
+};
 pub use crate::widgets::list::{
     ListAction, ListConfig, ListItem, ListItemId, ListOutcome, ListSelectionMode, ListState,
     ListTextOverflow, ListViewport,

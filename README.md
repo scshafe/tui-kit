@@ -27,7 +27,7 @@ Early. Extracted from [c4tui](https://github.com/scshafe/c4tui) as the reusable 
 | `widgets::tabs` | Policy-light tab state, close/reorder request hooks, pane split sizing policies, focus metadata, and inspectable pane layout results |
 | `widgets::tree` | Policy-light hierarchical state with expand/collapse, lazy-child hooks, optional tri-state checkboxes, stable IDs, and flattened viewport math |
 | `widgets::picker` | Generic list-with-detail-and-thumbnails picker, fuzzy filter, scrollable, selection highlight |
-| `widgets::dialog` | Modal with title, message, footer hint |
+| `widgets::dialog` | Modal rendering plus policy-light dialog state with explicit confirm/cancel/focus actions |
 | `terminal` | `Terminal` wrapping `ratatui::Terminal<CrosstermBackend>` + image registry + raw-mode lifecycle |
 
 ## Out of scope (today)
