@@ -30,8 +30,9 @@ use std::io::{self, Write};
 
 /// A surface that owns the image lifecycle for a particular protocol.
 ///
-/// Implementations: [`KittyImageRegistry`] and [`NoopImageSurface`]. Sixel and
-/// iTerm2 surfaces will implement this trait when added.
+/// Implementations: [`KittyImageRegistry`], [`NoopImageSurface`], and
+/// [`ImageSurfaceRegistry`]. Sixel and iTerm2 surfaces will implement this
+/// trait when added.
 pub trait ImageSurface {
     fn capabilities(&self) -> ImageCapabilities;
     fn ensure_loaded(&mut self, image_id: u32, png: &[u8]) -> Result<()>;
@@ -68,6 +69,159 @@ impl ImageBackendPreference {
     pub fn degraded_no_images() -> Self {
         Self::Disabled
     }
+}
+
+#[derive(Debug)]
+enum SelectedImageSurface {
+    Kitty(KittyImageRegistry),
+    Noop(NoopImageSurface),
+}
+
+/// Selected image surface plus the preference that produced it.
+///
+/// This is intentionally small and explicit for now: runtime probing can be
+/// added behind this seam later, while apps already get a machine-readable
+/// place to configure, inspect, and degrade image support.
+#[derive(Debug)]
+pub struct ImageSurfaceRegistry {
+    preference: ImageBackendPreference,
+    surface: SelectedImageSurface,
+}
+
+impl ImageSurfaceRegistry {
+    pub fn from_preference(preference: ImageBackendPreference) -> Result<Self, ConfigError> {
+        preference.validate()?;
+        let surface = match &preference {
+            ImageBackendPreference::KittyOnly
+            | ImageBackendPreference::Explicit(ImageProtocol::Kitty) => {
+                SelectedImageSurface::Kitty(KittyImageRegistry::default())
+            }
+            ImageBackendPreference::Disabled
+            | ImageBackendPreference::Explicit(ImageProtocol::Noop) => {
+                SelectedImageSurface::Noop(NoopImageSurface)
+            }
+            ImageBackendPreference::Explicit(protocol) => {
+                return Err(unsupported_protocol_error(
+                    *protocol,
+                    "image.backend.protocol",
+                ));
+            }
+            ImageBackendPreference::AutoDetect { order } => select_auto_detect_surface(order)?,
+        };
+        Ok(Self {
+            preference,
+            surface,
+        })
+    }
+
+    pub fn strict_kitty() -> Self {
+        Self::from_preference(ImageBackendPreference::strict_kitty())
+            .expect("strict Kitty image backend is a valid built-in preference")
+    }
+
+    pub fn degraded_no_images() -> Self {
+        Self::from_preference(ImageBackendPreference::degraded_no_images())
+            .expect("disabled image backend is a valid built-in preference")
+    }
+
+    pub fn preference(&self) -> &ImageBackendPreference {
+        &self.preference
+    }
+
+    pub fn delete_placements_in<I: IntoIterator<Item = u32>>(
+        &mut self,
+        placement_ids: I,
+    ) -> Result<()> {
+        for id in placement_ids {
+            self.delete_placement(id)?;
+        }
+        Ok(())
+    }
+
+    /// Drop-time cleanup for image data owned by the selected protocol.
+    pub fn shutdown(&mut self) {
+        if let SelectedImageSurface::Kitty(surface) = &mut self.surface {
+            surface.shutdown();
+        }
+    }
+}
+
+impl Default for ImageSurfaceRegistry {
+    fn default() -> Self {
+        Self::strict_kitty()
+    }
+}
+
+impl ImageSurface for ImageSurfaceRegistry {
+    fn capabilities(&self) -> ImageCapabilities {
+        match &self.surface {
+            SelectedImageSurface::Kitty(surface) => surface.capabilities(),
+            SelectedImageSurface::Noop(surface) => surface.capabilities(),
+        }
+    }
+
+    fn ensure_loaded(&mut self, image_id: u32, png: &[u8]) -> Result<()> {
+        match &mut self.surface {
+            SelectedImageSurface::Kitty(surface) => surface.ensure_loaded(image_id, png),
+            SelectedImageSurface::Noop(surface) => surface.ensure_loaded(image_id, png),
+        }
+    }
+
+    fn place(&mut self, opts: PlaceOptions) -> Result<()> {
+        match &mut self.surface {
+            SelectedImageSurface::Kitty(surface) => surface.place(opts),
+            SelectedImageSurface::Noop(surface) => surface.place(opts),
+        }
+    }
+
+    fn delete_placement(&mut self, placement_id: u32) -> Result<()> {
+        match &mut self.surface {
+            SelectedImageSurface::Kitty(surface) => surface.delete_placement(placement_id),
+            SelectedImageSurface::Noop(surface) => surface.delete_placement(placement_id),
+        }
+    }
+
+    fn delete_all_placements(&mut self) -> Result<()> {
+        match &mut self.surface {
+            SelectedImageSurface::Kitty(surface) => surface.delete_all_placements(),
+            SelectedImageSurface::Noop(surface) => surface.delete_all_placements(),
+        }
+    }
+
+    fn forget_all(&mut self) -> Result<()> {
+        match &mut self.surface {
+            SelectedImageSurface::Kitty(surface) => surface.forget_all(),
+            SelectedImageSurface::Noop(surface) => surface.forget_all(),
+        }
+    }
+
+    fn flush(&self) -> Result<()> {
+        match &self.surface {
+            SelectedImageSurface::Kitty(surface) => surface.flush(),
+            SelectedImageSurface::Noop(surface) => surface.flush(),
+        }
+    }
+}
+
+fn select_auto_detect_surface(
+    order: &[ImageProtocol],
+) -> Result<SelectedImageSurface, ConfigError> {
+    for protocol in order {
+        if *protocol == ImageProtocol::Kitty {
+            return Ok(SelectedImageSurface::Kitty(KittyImageRegistry::default()));
+        }
+    }
+    Err(ConfigError::new(
+        "image.backend.order",
+        "auto-detect order contains no implemented terminal image protocol",
+    ))
+}
+
+fn unsupported_protocol_error(protocol: ImageProtocol, path: &'static str) -> ConfigError {
+    ConfigError::new(
+        path,
+        format!("image protocol {protocol:?} is not implemented yet"),
+    )
 }
 
 impl Validate for ImageBackendPreference {
@@ -333,6 +487,10 @@ mod tests {
         assert!(kitty.placements);
         assert!(kitty.source_cropping);
 
+        let registry = ImageSurfaceRegistry::strict_kitty().capabilities();
+        assert_eq!(registry.protocol, ImageProtocol::Kitty);
+        assert!(registry.deletion);
+
         let noop = NoopImageSurface.capabilities();
         assert_eq!(noop.protocol, ImageProtocol::Noop);
         assert!(!noop.placements);
@@ -343,6 +501,47 @@ mod tests {
                 height: 0
             })
         );
+    }
+
+    #[test]
+    fn surface_registry_selects_disabled_backend_as_noop() {
+        let registry =
+            ImageSurfaceRegistry::from_preference(ImageBackendPreference::Disabled).unwrap();
+
+        assert_eq!(registry.preference(), &ImageBackendPreference::Disabled);
+        assert_eq!(registry.capabilities().protocol, ImageProtocol::Noop);
+    }
+
+    #[test]
+    fn surface_registry_rejects_unimplemented_explicit_protocol() {
+        let error = ImageSurfaceRegistry::from_preference(ImageBackendPreference::Explicit(
+            ImageProtocol::Sixel,
+        ))
+        .unwrap_err();
+
+        assert_eq!(error.path, "image.backend.protocol");
+        assert!(error.reason.contains("not implemented"));
+    }
+
+    #[test]
+    fn surface_registry_auto_detects_first_implemented_protocol() {
+        let registry = ImageSurfaceRegistry::from_preference(ImageBackendPreference::AutoDetect {
+            order: vec![ImageProtocol::ITerm2, ImageProtocol::Kitty],
+        })
+        .unwrap();
+
+        assert_eq!(registry.capabilities().protocol, ImageProtocol::Kitty);
+    }
+
+    #[test]
+    fn surface_registry_rejects_auto_detect_without_supported_protocol() {
+        let error = ImageSurfaceRegistry::from_preference(ImageBackendPreference::AutoDetect {
+            order: vec![ImageProtocol::Sixel],
+        })
+        .unwrap_err();
+
+        assert_eq!(error.path, "image.backend.order");
+        assert!(error.reason.contains("no implemented"));
     }
 
     #[test]

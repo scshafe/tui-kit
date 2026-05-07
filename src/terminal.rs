@@ -1,6 +1,6 @@
 //! Owns the lifecycle of the live terminal: raw mode, alternate screen,
 //! mouse capture, [`ratatui::Terminal`] backed by [`crossterm`], and
-//! the [`KittyImageRegistry`] for image placements.
+//! the selected [`ImageSurfaceRegistry`] for image placements.
 //!
 //! The expected usage:
 //!
@@ -14,9 +14,9 @@
 //!
 //! Drop restores the user's terminal: leaves alt-screen, disables mouse
 //! capture, restores cursor visibility, exits raw mode, and emits a
-//! global Kitty `delete-all` so no image placements leak.
+//! selected image backend cleanup so no image placements leak.
 
-use crate::image::KittyImageRegistry;
+use crate::image::{ImageBackendPreference, ImageSurfaceRegistry};
 use crate::layout::CanvasMetrics;
 use crate::tty::terminal_metrics;
 use anyhow::Result;
@@ -28,7 +28,7 @@ type Inner = ratatui::Terminal<CrosstermBackend<Stdout>>;
 
 pub struct Terminal {
     inner: Option<Inner>,
-    images: KittyImageRegistry,
+    images: ImageSurfaceRegistry,
 }
 
 impl std::fmt::Debug for Terminal {
@@ -41,8 +41,18 @@ impl std::fmt::Debug for Terminal {
 
 impl Terminal {
     /// Enter raw mode, alt screen, mouse capture, and construct a
-    /// ratatui terminal. Restored on drop.
+    /// ratatui terminal with the default strict Kitty image backend.
+    /// Restored on drop.
     pub fn enter() -> Result<Self> {
+        Self::enter_with_image_backend(ImageBackendPreference::strict_kitty())
+    }
+
+    /// Enter raw mode with an explicit image backend preference.
+    ///
+    /// This keeps backend selection noisy and machine-readable: invalid or
+    /// currently unimplemented protocols fail before terminal setup begins.
+    pub fn enter_with_image_backend(image_backend: ImageBackendPreference) -> Result<Self> {
+        let images = ImageSurfaceRegistry::from_preference(image_backend)?;
         crossterm::terminal::enable_raw_mode()?;
         let mut stdout = io::stdout();
         crossterm::execute!(
@@ -55,7 +65,7 @@ impl Terminal {
         let inner = ratatui::Terminal::new(backend)?;
         Ok(Self {
             inner: Some(inner),
-            images: KittyImageRegistry::default(),
+            images,
         })
     }
 
@@ -71,7 +81,7 @@ impl Terminal {
         Ok(())
     }
 
-    pub fn images(&mut self) -> &mut KittyImageRegistry {
+    pub fn images(&mut self) -> &mut ImageSurfaceRegistry {
         &mut self.images
     }
 
