@@ -6,7 +6,7 @@
 
 use std::fmt;
 
-use ratatui::layout::Rect;
+use ratatui::{buffer::Buffer, layout::Rect};
 use serde::{Deserialize, Serialize};
 
 /// Stable identifier for a component instance.
@@ -209,6 +209,183 @@ pub trait Component {
     }
 }
 
+/// Buffer-native component shape used by [`Cached`].
+///
+/// Most components should implement [`Component`] directly. Implement this
+/// trait when rendering can be represented fully in a ratatui [`Buffer`] and is
+/// therefore safe to replay without re-running component-specific render logic.
+/// Terminal side effects such as image placement should remain explicit dirty
+/// reasons and should not be hidden behind this cache.
+pub trait BufferComponent {
+    type Event;
+    type Message;
+
+    fn id(&self) -> &ComponentId;
+
+    fn render_buffer(&mut self, area: Rect, buffer: &mut Buffer) -> anyhow::Result<()>;
+
+    fn handle_event(
+        &mut self,
+        event: &Self::Event,
+    ) -> anyhow::Result<ComponentOutcome<Self::Message>>;
+
+    fn dirty(&self) -> &DirtyState;
+
+    fn mark_dirty(&mut self, reason: DirtyReason);
+
+    fn clear_dirty(&mut self);
+
+    fn focus_node(&self) -> Option<FocusNode> {
+        None
+    }
+
+    fn children(&self) -> ComponentChildren<'_> {
+        &[]
+    }
+}
+
+/// Machine-readable render cache counters for [`Cached`].
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CachedRenderStats {
+    pub renders: u64,
+    pub replays: u64,
+}
+
+/// Cached wrapper for buffer-native components.
+///
+/// The wrapper only reuses output for components that opt into
+/// [`BufferComponent`], making the safety boundary explicit. Dirty state and
+/// area changes invalidate the cache; clean components with an unchanged area
+/// replay the previous buffer into the current frame.
+#[derive(Debug, Clone)]
+pub struct Cached<C> {
+    inner: C,
+    cache: Option<Buffer>,
+    cached_area: Option<Rect>,
+    stats: CachedRenderStats,
+}
+
+impl<C> Cached<C> {
+    pub fn new(inner: C) -> Self {
+        Self {
+            inner,
+            cache: None,
+            cached_area: None,
+            stats: CachedRenderStats::default(),
+        }
+    }
+
+    pub fn inner(&self) -> &C {
+        &self.inner
+    }
+
+    pub fn inner_mut(&mut self) -> &mut C {
+        self.invalidate();
+        &mut self.inner
+    }
+
+    pub fn into_inner(self) -> C {
+        self.inner
+    }
+
+    pub fn cached_area(&self) -> Option<Rect> {
+        self.cached_area
+    }
+
+    pub fn stats(&self) -> CachedRenderStats {
+        self.stats
+    }
+
+    pub fn invalidate(&mut self) {
+        self.cache = None;
+        self.cached_area = None;
+    }
+}
+
+impl<C> Cached<C>
+where
+    C: BufferComponent,
+{
+    pub fn render_to_buffer(&mut self, area: Rect, target: &mut Buffer) -> anyhow::Result<()> {
+        self.ensure_cache(area)?;
+        if let Some(cache) = &self.cache {
+            blit(cache, target);
+            self.stats.replays += 1;
+        }
+        Ok(())
+    }
+
+    fn ensure_cache(&mut self, area: Rect) -> anyhow::Result<()> {
+        let area_changed = self.cached_area != Some(area);
+        if self.cache.is_some() && !area_changed && self.inner.dirty().is_clean() {
+            return Ok(());
+        }
+
+        let mut buffer = Buffer::empty(area);
+        self.inner.render_buffer(area, &mut buffer)?;
+        self.inner.clear_dirty();
+        self.cache = Some(buffer);
+        self.cached_area = Some(area);
+        self.stats.renders += 1;
+        Ok(())
+    }
+}
+
+impl<C> Component for Cached<C>
+where
+    C: BufferComponent,
+{
+    type Event = C::Event;
+    type Message = C::Message;
+
+    fn id(&self) -> &ComponentId {
+        self.inner.id()
+    }
+
+    fn render(&mut self, frame: &mut ratatui::Frame<'_>, area: Rect) -> anyhow::Result<()> {
+        self.render_to_buffer(area, frame.buffer_mut())
+    }
+
+    fn handle_event(
+        &mut self,
+        event: &Self::Event,
+    ) -> anyhow::Result<ComponentOutcome<Self::Message>> {
+        self.inner.handle_event(event)
+    }
+
+    fn dirty(&self) -> &DirtyState {
+        self.inner.dirty()
+    }
+
+    fn mark_dirty(&mut self, reason: DirtyReason) {
+        self.invalidate();
+        self.inner.mark_dirty(reason);
+    }
+
+    fn clear_dirty(&mut self) {
+        self.inner.clear_dirty();
+    }
+
+    fn focus_node(&self) -> Option<FocusNode> {
+        self.inner.focus_node()
+    }
+
+    fn children(&self) -> ComponentChildren<'_> {
+        self.inner.children()
+    }
+}
+
+fn blit(source: &Buffer, target: &mut Buffer) {
+    let area = *source.area();
+    for y in area.y..area.y.saturating_add(area.height) {
+        for x in area.x..area.x.saturating_add(area.width) {
+            if let (Some(src), Some(dst)) = (source.cell((x, y)), target.cell_mut((x, y))) {
+                *dst = src.clone();
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -252,5 +429,91 @@ mod tests {
     fn component_outcome_reports_handling() {
         assert!(!ComponentOutcome::<()>::Ignored.is_handled());
         assert!(ComponentOutcome::<()>::Handled.is_handled());
+    }
+
+    #[derive(Debug)]
+    struct CountingBufferComponent {
+        id: ComponentId,
+        dirty: DirtyState,
+        renders: usize,
+    }
+
+    impl CountingBufferComponent {
+        fn new() -> Self {
+            Self {
+                id: ComponentId::new("counter"),
+                dirty: DirtyState::paint(DirtyReason::Explicit),
+                renders: 0,
+            }
+        }
+    }
+
+    impl BufferComponent for CountingBufferComponent {
+        type Event = ();
+        type Message = ();
+
+        fn id(&self) -> &ComponentId {
+            &self.id
+        }
+
+        fn render_buffer(&mut self, area: Rect, buffer: &mut Buffer) -> anyhow::Result<()> {
+            self.renders += 1;
+            let symbol = self.renders.to_string();
+            if let Some(cell) = buffer.cell_mut((area.x, area.y)) {
+                cell.set_symbol(&symbol);
+            }
+            Ok(())
+        }
+
+        fn handle_event(&mut self, _event: &Self::Event) -> anyhow::Result<ComponentOutcome<()>> {
+            Ok(ComponentOutcome::Ignored)
+        }
+
+        fn dirty(&self) -> &DirtyState {
+            &self.dirty
+        }
+
+        fn mark_dirty(&mut self, reason: DirtyReason) {
+            self.dirty.mark_paint(reason);
+        }
+
+        fn clear_dirty(&mut self) {
+            self.dirty.clear();
+        }
+    }
+
+    #[test]
+    fn cached_buffer_component_replays_clean_same_area_output() -> anyhow::Result<()> {
+        let area = Rect::new(0, 0, 3, 1);
+        let mut cached = Cached::new(CountingBufferComponent::new());
+        let mut first = Buffer::empty(area);
+        let mut second = Buffer::empty(area);
+
+        cached.render_to_buffer(area, &mut first)?;
+        cached.render_to_buffer(area, &mut second)?;
+
+        assert_eq!(cached.inner().renders, 1);
+        assert_eq!(cached.stats().renders, 1);
+        assert_eq!(cached.stats().replays, 2);
+        assert_eq!(first.cell((0, 0)), second.cell((0, 0)));
+        Ok(())
+    }
+
+    #[test]
+    fn cached_buffer_component_invalidates_on_dirty_or_area_change() -> anyhow::Result<()> {
+        let area = Rect::new(0, 0, 3, 1);
+        let larger = Rect::new(0, 0, 4, 1);
+        let mut cached = Cached::new(CountingBufferComponent::new());
+        let mut target = Buffer::empty(larger);
+
+        cached.render_to_buffer(area, &mut target)?;
+        cached.mark_dirty(DirtyReason::DataUpdate);
+        cached.render_to_buffer(area, &mut target)?;
+        cached.render_to_buffer(larger, &mut target)?;
+
+        assert_eq!(cached.inner().renders, 3);
+        assert_eq!(cached.stats().renders, 3);
+        assert_eq!(cached.cached_area(), Some(larger));
+        Ok(())
     }
 }

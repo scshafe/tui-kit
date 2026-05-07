@@ -11,7 +11,7 @@ Early. Extracted from [c4tui](https://github.com/scshafe/c4tui) as the reusable 
 | Module | Provides |
 |---|---|
 | `events` | Typed `AppEvent<UserEvent>` categories + unified channel: input, terminal, scheduler, watcher, tick, runtime/user events |
-| `component` | Optional component trait, stable IDs, focus node handles, and explicit dirty-state invalidation |
+| `component` | Optional component traits, stable IDs, focus node handles, explicit dirty-state invalidation, and safe buffer caching for opt-in components |
 | `input` | `Key` enum mapped from crossterm events |
 | `input_thread` | Detached input thread that pushes `InputEvent::Key` and `TerminalEvent::Resize` into the unified channel |
 | `keymap` | `KeyMap` registry with `KeyTrigger → Command<C>` declarative bindings, last-binding-wins |
@@ -30,7 +30,7 @@ Early. Extracted from [c4tui](https://github.com/scshafe/c4tui) as the reusable 
 
 - Image surfaces other than Kitty graphics (Sixel, iTerm2)
 - Async runtimes (tokio/async-std) — uses sync threads + channels
-- Full component tree runtime/cached rendering orchestration
+- Full component tree runtime orchestration
 - Theming system, plugin loading, etc.
 
 ## License

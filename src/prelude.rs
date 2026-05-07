@@ -6,7 +6,8 @@
 
 pub use crate::bar::{Segment, SegmentBar, SegmentSlot, StatusFragment};
 pub use crate::component::{
-    Component, ComponentChildren, ComponentId, ComponentOutcome, DirtyReason, DirtyState, FocusNode,
+    BufferComponent, Cached, CachedRenderStats, Component, ComponentChildren, ComponentId,
+    ComponentOutcome, DirtyReason, DirtyState, FocusNode,
 };
 pub use crate::config::{ConfigError, KitConfig, Validate};
 pub use crate::events::{
