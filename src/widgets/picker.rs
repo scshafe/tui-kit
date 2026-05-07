@@ -14,6 +14,7 @@
 //! See `c4tui::picker` for the application-side wiring.
 
 use crate::input::Key;
+use crate::keymap::{KeyMap, KeyTrigger, SpecialKey};
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 use ratatui::style::{Modifier, Style};
@@ -30,6 +31,22 @@ pub struct PickerItem<T: Clone> {
     pub payload: T,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PickerAction {
+    MoveUp,
+    MoveDown,
+    PageUp,
+    PageDown,
+    Select,
+    Cancel,
+    ClearFilterOrCancel,
+    BackspaceFilter,
+    AppendFilterChar(char),
+    ToggleGroup { group: String },
+    ToggleSelectedItemGroup,
+    Custom(String),
+}
+
 #[derive(Debug, Clone)]
 pub struct PickerConfig {
     pub title: String,
@@ -38,10 +55,11 @@ pub struct PickerConfig {
     pub thumb_rows: u16,
     pub item_row_span: u16,
     pub allow_thumbnails: bool,
+    pub actions: KeyMap<PickerAction>,
 }
 
-impl Default for PickerConfig {
-    fn default() -> Self {
+impl PickerConfig {
+    pub fn explicit(actions: KeyMap<PickerAction>) -> Self {
         Self {
             title: " Picker ".to_owned(),
             bottom_hint: " type → filter | Enter → select | Esc → cancel ".to_owned(),
@@ -49,7 +67,35 @@ impl Default for PickerConfig {
             thumb_rows: 3,
             item_row_span: 3,
             allow_thumbnails: true,
+            actions,
         }
+    }
+
+    pub fn default_navigation() -> Self {
+        let mut actions = KeyMap::new();
+        actions
+            .bind(KeyTrigger::Special(SpecialKey::Up), PickerAction::MoveUp)
+            .bind(
+                KeyTrigger::Special(SpecialKey::Down),
+                PickerAction::MoveDown,
+            )
+            .bind(KeyTrigger::Special(SpecialKey::Enter), PickerAction::Select)
+            .bind(
+                KeyTrigger::Special(SpecialKey::Esc),
+                PickerAction::ClearFilterOrCancel,
+            )
+            .bind(KeyTrigger::Special(SpecialKey::CtrlC), PickerAction::Cancel)
+            .bind(
+                KeyTrigger::Special(SpecialKey::Back),
+                PickerAction::BackspaceFilter,
+            );
+        Self::explicit(actions)
+    }
+}
+
+impl Default for PickerConfig {
+    fn default() -> Self {
+        Self::default_navigation()
     }
 }
 
@@ -69,6 +115,7 @@ pub enum PickerOutcome {
     Select(u64),
     Cancel,
     ToggleHiddenGroup(String),
+    Custom(String),
 }
 
 impl<T: Clone> Picker<T> {
@@ -122,8 +169,51 @@ impl<T: Clone> Picker<T> {
     }
 
     pub fn handle_key(&mut self, key: Key) -> PickerOutcome {
+        if let Some(action) = self.config.actions.lookup(key) {
+            return self.handle_action(action);
+        }
         match key {
-            Key::Esc => {
+            Key::Char(c) => self.handle_action(PickerAction::AppendFilterChar(c)),
+            _ => PickerOutcome::Continue,
+        }
+    }
+
+    pub fn append_filter_char(&mut self, c: char) -> PickerOutcome {
+        self.filter.push(c);
+        self.clamp_selection();
+        PickerOutcome::Continue
+    }
+
+    pub fn handle_action(&mut self, action: PickerAction) -> PickerOutcome {
+        match action {
+            PickerAction::MoveUp => {
+                self.move_selection(-1);
+                PickerOutcome::Continue
+            }
+            PickerAction::MoveDown => {
+                self.move_selection(1);
+                PickerOutcome::Continue
+            }
+            PickerAction::PageUp => {
+                self.move_selection(-10);
+                PickerOutcome::Continue
+            }
+            PickerAction::PageDown => {
+                self.move_selection(10);
+                PickerOutcome::Continue
+            }
+            PickerAction::Select => {
+                let visible = self.visible_ids();
+                if let Some(target) = visible.iter().find(|id| **id == self.selected_id).copied() {
+                    PickerOutcome::Select(target)
+                } else if let Some(first) = visible.first().copied() {
+                    PickerOutcome::Select(first)
+                } else {
+                    PickerOutcome::Continue
+                }
+            }
+            PickerAction::Cancel => PickerOutcome::Cancel,
+            PickerAction::ClearFilterOrCancel => {
                 if self.filter.is_empty() {
                     PickerOutcome::Cancel
                 } else {
@@ -132,41 +222,18 @@ impl<T: Clone> Picker<T> {
                     PickerOutcome::Continue
                 }
             }
-            Key::CtrlC => PickerOutcome::Cancel,
-            Key::Enter => {
-                let visible = self.visible_ids();
-                if let Some(target) = visible.iter().find(|id| **id == self.selected_id).copied()
-                {
-                    PickerOutcome::Select(target)
-                } else if let Some(first) = visible.first().copied() {
-                    PickerOutcome::Select(first)
-                } else {
-                    PickerOutcome::Continue
-                }
-            }
-            Key::Up => {
-                self.move_selection(-1);
-                PickerOutcome::Continue
-            }
-            Key::Down => {
-                self.move_selection(1);
-                PickerOutcome::Continue
-            }
-            Key::Tab => {
-                // Apps own group-toggle policy; emit an event for them to react to.
-                PickerOutcome::ToggleHiddenGroup("default".to_owned())
-            }
-            Key::Back => {
+            PickerAction::BackspaceFilter => {
                 self.filter.pop();
                 self.clamp_selection();
                 PickerOutcome::Continue
             }
-            Key::Char(c) => {
-                self.filter.push(c);
-                self.clamp_selection();
-                PickerOutcome::Continue
-            }
-            _ => PickerOutcome::Continue,
+            PickerAction::AppendFilterChar(c) => self.append_filter_char(c),
+            PickerAction::ToggleGroup { group } => PickerOutcome::ToggleHiddenGroup(group),
+            PickerAction::ToggleSelectedItemGroup => self
+                .selected_item_group()
+                .map(PickerOutcome::ToggleHiddenGroup)
+                .unwrap_or(PickerOutcome::Continue),
+            PickerAction::Custom(name) => PickerOutcome::Custom(name),
         }
     }
 
@@ -211,6 +278,13 @@ impl<T: Clone> Picker<T> {
 
     fn visible_ids(&self) -> Vec<u64> {
         self.visible_items().into_iter().map(|i| i.id).collect()
+    }
+
+    fn selected_item_group(&self) -> Option<String> {
+        self.items
+            .iter()
+            .find(|item| item.id == self.selected_id)
+            .and_then(|item| item.group.clone())
     }
 
     pub fn matched_search_for<'a>(&self, item: &'a PickerItem<T>) -> Option<&'a str> {
@@ -418,10 +492,9 @@ impl<'a, T: Clone> Widget for PickerWidget<'a, T> {
                         let detail_row = screen_row + 1;
                         if detail_row < body.y + body.height {
                             let detail_offset: u16 = if thumb_drawn { 4 } else { 2 };
-                            let avail = body
-                                .width
-                                .saturating_sub(if thumb_drawn { cfg.thumb_cols + 4 } else { 0 } + 1)
-                                as usize;
+                            let avail = body.width.saturating_sub(
+                                if thumb_drawn { cfg.thumb_cols + 4 } else { 0 } + 1,
+                            ) as usize;
                             buf.set_string(
                                 text_col + detail_offset.saturating_sub(2),
                                 detail_row,
@@ -548,7 +621,7 @@ mod tests {
     fn filter_subsequence_match() {
         let mut p = picker();
         for c in "an".chars() {
-            p.handle_key(Key::Char(c));
+            p.append_filter_char(c);
         }
         let visible: Vec<u64> = p.visible_items().into_iter().map(|i| i.id).collect();
         assert!(visible.contains(&1)); // Banana matches a..n
@@ -558,7 +631,7 @@ mod tests {
     fn enter_selects_first_visible_when_current_filtered_out() {
         let mut p = picker();
         for c in "donu".chars() {
-            p.handle_key(Key::Char(c));
+            p.append_filter_char(c);
         }
         let outcome = p.handle_key(Key::Enter);
         assert_eq!(outcome, PickerOutcome::Select(3));
@@ -567,7 +640,7 @@ mod tests {
     #[test]
     fn esc_clears_filter_then_cancels() {
         let mut p = picker();
-        p.handle_key(Key::Char('a'));
+        p.append_filter_char('a');
         let o = p.handle_key(Key::Esc);
         assert_eq!(o, PickerOutcome::Continue);
         let o = p.handle_key(Key::Esc);
@@ -593,5 +666,25 @@ mod tests {
         assert!(!visible.contains(&0));
         assert!(!visible.contains(&1));
         assert!(visible.contains(&2));
+    }
+
+    #[test]
+    fn tab_is_unbound_by_default() {
+        let mut p = picker();
+        assert_eq!(p.handle_key(Key::Tab), PickerOutcome::Continue);
+    }
+
+    #[test]
+    fn configured_actions_can_toggle_selected_group() {
+        let mut cfg = PickerConfig::default_navigation();
+        cfg.actions.bind(
+            KeyTrigger::Special(SpecialKey::Tab),
+            PickerAction::ToggleSelectedItemGroup,
+        );
+        let mut p = Picker::new(vec![item(0, "Apple", Some("Fruits"))], cfg, 0);
+        assert_eq!(
+            p.handle_key(Key::Tab),
+            PickerOutcome::ToggleHiddenGroup("Fruits".to_owned())
+        );
     }
 }

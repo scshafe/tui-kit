@@ -24,5 +24,5 @@ pub use crate::tty::{
 pub use crate::watcher::WorkspaceWatcher;
 pub use crate::widgets::dialog::Dialog;
 pub use crate::widgets::picker::{
-    Picker, PickerConfig, PickerItem, PickerOutcome, PickerWidget, ThumbnailRequest,
+    Picker, PickerAction, PickerConfig, PickerItem, PickerOutcome, PickerWidget, ThumbnailRequest,
 };
