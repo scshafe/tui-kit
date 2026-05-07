@@ -46,3 +46,7 @@ pub use crate::widgets::list::{
 pub use crate::widgets::picker::{
     Picker, PickerAction, PickerConfig, PickerItem, PickerOutcome, PickerWidget, ThumbnailRequest,
 };
+pub use crate::widgets::table::{
+    TableAction, TableAlignment, TableColumn, TableColumnId, TableColumnLayout, TableColumnSizing,
+    TableConfig, TableOutcome, TableRow, TableRowId, TableSelectionMode, TableState, TableViewport,
+};

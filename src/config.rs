@@ -9,14 +9,14 @@ use std::fmt;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ConfigError {
-    pub path: &'static str,
+    pub path: String,
     pub reason: String,
 }
 
 impl ConfigError {
-    pub fn new(path: &'static str, reason: impl Into<String>) -> Self {
+    pub fn new(path: impl Into<String>, reason: impl Into<String>) -> Self {
         Self {
-            path,
+            path: path.into(),
             reason: reason.into(),
         }
     }
