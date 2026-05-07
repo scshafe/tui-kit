@@ -1,8 +1,9 @@
 //! Image-on-text-cells lifecycle management.
 //!
-//! Currently only the Kitty graphics protocol is implemented. The
-//! [`ImageSurface`] trait is the seam for future Sixel and iTerm2 backends:
-//! same `ensure_loaded → place → delete` lifecycle, different wire format.
+//! Currently the Kitty graphics protocol and an explicit no-op degraded
+//! surface are implemented. The [`ImageSurface`] trait is the seam for future
+//! Sixel and iTerm2 backends: same `ensure_loaded → place → delete` lifecycle,
+//! different wire format and capabilities.
 //!
 //! ## Lifecycle
 //!
@@ -18,18 +19,21 @@
 //! 5. `shutdown()` — emits a global "delete all everything" escape.
 //!    Drop-time cleanup only.
 
-use crate::layout::PixelRect;
+use crate::config::{ConfigError, Validate};
+use crate::layout::{PixelRect, PixelSize};
 use crate::tty::write_stdout_all;
 use anyhow::Result;
 use base64::Engine;
+use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use std::io::{self, Write};
 
 /// A surface that owns the image lifecycle for a particular protocol.
 ///
-/// Implementations: [`KittyImageRegistry`]. Sixel/iTerm2 surfaces will
-/// implement this trait when added.
+/// Implementations: [`KittyImageRegistry`] and [`NoopImageSurface`]. Sixel and
+/// iTerm2 surfaces will implement this trait when added.
 pub trait ImageSurface {
+    fn capabilities(&self) -> ImageCapabilities;
     fn ensure_loaded(&mut self, image_id: u32, png: &[u8]) -> Result<()>;
     fn place(&mut self, opts: PlaceOptions) -> Result<()>;
     fn delete_placement(&mut self, placement_id: u32) -> Result<()>;
@@ -38,13 +42,138 @@ pub trait ImageSurface {
     fn flush(&self) -> Result<()>;
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[non_exhaustive]
+pub enum ImageProtocol {
+    Kitty,
+    Sixel,
+    ITerm2,
+    Noop,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[non_exhaustive]
+pub enum ImageBackendPreference {
+    KittyOnly,
+    AutoDetect { order: Vec<ImageProtocol> },
+    Explicit(ImageProtocol),
+    Disabled,
+}
+
+impl ImageBackendPreference {
+    pub fn strict_kitty() -> Self {
+        Self::KittyOnly
+    }
+
+    pub fn degraded_no_images() -> Self {
+        Self::Disabled
+    }
+}
+
+impl Validate for ImageBackendPreference {
+    fn validate(&self) -> Result<(), ConfigError> {
+        match self {
+            Self::AutoDetect { order } if order.is_empty() => Err(ConfigError::new(
+                "image.backend.order",
+                "auto-detect backend preference requires at least one protocol",
+            )),
+            Self::AutoDetect { order } if order.contains(&ImageProtocol::Noop) => {
+                Err(ConfigError::new(
+                    "image.backend.order",
+                    "Noop is a degraded fallback, not a detectable terminal image protocol",
+                ))
+            }
+            _ => Ok(()),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ImageCapabilities {
+    pub protocol: ImageProtocol,
+    pub placements: bool,
+    pub deletion: bool,
+    pub source_cropping: bool,
+    pub max_pixels: Option<PixelSize>,
+    pub transparency: TransparencySupport,
+}
+
+impl ImageCapabilities {
+    pub fn kitty() -> Self {
+        Self {
+            protocol: ImageProtocol::Kitty,
+            placements: true,
+            deletion: true,
+            source_cropping: true,
+            max_pixels: None,
+            transparency: TransparencySupport::Alpha,
+        }
+    }
+
+    pub fn noop() -> Self {
+        Self {
+            protocol: ImageProtocol::Noop,
+            placements: false,
+            deletion: false,
+            source_cropping: false,
+            max_pixels: Some(PixelSize {
+                width: 0,
+                height: 0,
+            }),
+            transparency: TransparencySupport::Unsupported,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[non_exhaustive]
+pub enum TransparencySupport {
+    Alpha,
+    OpaqueOnly,
+    Unsupported,
+    Unknown,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PlaceOptions {
     pub image_id: u32,
     pub placement_id: u32,
     pub source: PixelRect,
     pub cell_cols: u16,
     pub cell_rows: u16,
+}
+
+#[derive(Debug, Default)]
+pub struct NoopImageSurface;
+
+impl ImageSurface for NoopImageSurface {
+    fn capabilities(&self) -> ImageCapabilities {
+        ImageCapabilities::noop()
+    }
+
+    fn ensure_loaded(&mut self, _image_id: u32, _png: &[u8]) -> Result<()> {
+        Ok(())
+    }
+
+    fn place(&mut self, _opts: PlaceOptions) -> Result<()> {
+        Ok(())
+    }
+
+    fn delete_placement(&mut self, _placement_id: u32) -> Result<()> {
+        Ok(())
+    }
+
+    fn delete_all_placements(&mut self) -> Result<()> {
+        Ok(())
+    }
+
+    fn forget_all(&mut self) -> Result<()> {
+        Ok(())
+    }
+
+    fn flush(&self) -> Result<()> {
+        Ok(())
+    }
 }
 
 #[derive(Debug, Default)]
@@ -73,6 +202,10 @@ impl KittyImageRegistry {
 }
 
 impl ImageSurface for KittyImageRegistry {
+    fn capabilities(&self) -> ImageCapabilities {
+        ImageCapabilities::kitty()
+    }
+
     fn ensure_loaded(&mut self, image_id: u32, png: &[u8]) -> Result<()> {
         if self.loaded.contains(&image_id) {
             return Ok(());
@@ -167,4 +300,72 @@ pub const PICKER_PLACEMENT_ID_BASE: u32 = 100;
 
 pub fn picker_placement_id(item_index: usize) -> u32 {
     PICKER_PLACEMENT_ID_BASE + (item_index as u32)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn backend_preference_rejects_empty_auto_detect_order() {
+        let error = ImageBackendPreference::AutoDetect { order: vec![] }
+            .validate()
+            .unwrap_err();
+
+        assert_eq!(error.path, "image.backend.order");
+    }
+
+    #[test]
+    fn backend_preference_rejects_noop_auto_detect_protocol() {
+        let error = ImageBackendPreference::AutoDetect {
+            order: vec![ImageProtocol::Noop],
+        }
+        .validate()
+        .unwrap_err();
+
+        assert!(error.reason.contains("degraded fallback"));
+    }
+
+    #[test]
+    fn surfaces_report_machine_readable_capabilities() {
+        let kitty = KittyImageRegistry::default().capabilities();
+        assert_eq!(kitty.protocol, ImageProtocol::Kitty);
+        assert!(kitty.placements);
+        assert!(kitty.source_cropping);
+
+        let noop = NoopImageSurface.capabilities();
+        assert_eq!(noop.protocol, ImageProtocol::Noop);
+        assert!(!noop.placements);
+        assert_eq!(
+            noop.max_pixels,
+            Some(PixelSize {
+                width: 0,
+                height: 0
+            })
+        );
+    }
+
+    #[test]
+    fn noop_surface_accepts_full_lifecycle_without_io() {
+        let mut surface = NoopImageSurface;
+        surface.ensure_loaded(1, b"not really png").unwrap();
+        surface
+            .place(PlaceOptions {
+                image_id: 1,
+                placement_id: 10,
+                source: PixelRect {
+                    x: 0,
+                    y: 0,
+                    width: 1,
+                    height: 1,
+                },
+                cell_cols: 1,
+                cell_rows: 1,
+            })
+            .unwrap();
+        surface.delete_placement(10).unwrap();
+        surface.delete_all_placements().unwrap();
+        surface.forget_all().unwrap();
+        surface.flush().unwrap();
+    }
 }

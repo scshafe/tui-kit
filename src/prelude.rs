@@ -8,7 +8,8 @@ pub use crate::bar::{Segment, SegmentBar, SegmentSlot, StatusFragment};
 pub use crate::config::{ConfigError, KitConfig, Validate};
 pub use crate::events::{AppEvent, AppEventReceiver, AppEventSender};
 pub use crate::image::{
-    picker_placement_id, ImageSurface, KittyImageRegistry, PlaceOptions, MAIN_PLACEMENT_ID,
+    picker_placement_id, ImageBackendPreference, ImageCapabilities, ImageProtocol, ImageSurface,
+    KittyImageRegistry, NoopImageSurface, PlaceOptions, TransparencySupport, MAIN_PLACEMENT_ID,
     PICKER_PLACEMENT_ID_BASE,
 };
 pub use crate::input::Key;
