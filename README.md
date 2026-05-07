@@ -22,6 +22,7 @@ Early. Extracted from [c4tui](https://github.com/scshafe/c4tui) as the reusable 
 | `scheduler` | Priority-queue task scheduler with epoch-based cancellation |
 | `watcher` | notify-based file watcher with debounce, emits `WatcherEvent::WorkspaceChanged` |
 | `tick` | Named periodic tick producers with explicit validation and stop handles |
+| `widgets::list` | Policy-light scrollable list mechanics with optional selection, exposed viewport math, explicit key actions |
 | `widgets::picker` | Generic list-with-detail-and-thumbnails picker, fuzzy filter, scrollable, selection highlight |
 | `widgets::dialog` | Modal with title, message, footer hint |
 | `terminal` | `Terminal` wrapping `ratatui::Terminal<CrosstermBackend>` + image registry + raw-mode lifecycle |

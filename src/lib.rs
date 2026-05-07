@@ -10,7 +10,7 @@
 //! - Slot-aligned, priority-truncated text bars in [`bar`].
 //! - Priority-queue [`scheduler`] for async work.
 //! - File [`watcher`] integration.
-//! - Composed [`widgets`] (picker, dialog) and a [`terminal`] session wrapper.
+//! - Composed [`widgets`] (list, picker, dialog) and a [`terminal`] session wrapper.
 //!
 //! See [`prelude`] for the most common imports. See `PLAN.md` in the repo
 //! for the module-by-module map and roadmap.
