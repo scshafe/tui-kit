@@ -30,6 +30,7 @@ pub use crate::layout::{
     ImageZoomLimitPolicy, PixelRect, PixelSize, Placement, PlacementAnchor, PlacementEngine,
     PlacementPolicy, ViewTransform, MAX_SCALE, MIN_SCALE,
 };
+pub use crate::runtime::RuntimeConfig;
 pub use crate::scheduler::{
     CancellationReport, Completion, Priority, Progress, RequestScope, Scheduler, SchedulerConfig,
     SchedulerStats,
