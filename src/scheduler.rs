@@ -2,9 +2,13 @@
 //!
 //! [`Scheduler<Item, Out>`] runs an `Fn(&Item) -> Result<Out>` executor on
 //! a pool of worker threads. Submissions are de-duplicated by `id`,
-//! prioritised by [`Priority`], and cancellable by id, group, source, epoch
-//! namespace, or all work. In-flight items finish but cancelled results are
-//! silently dropped.
+//! prioritised by an ordered priority value, and cancellable by id, group,
+//! source, epoch namespace, or all work. In-flight items finish but cancelled
+//! results are silently dropped.
+//!
+//! The default priority type is [`Priority`], but callers with richer routing
+//! needs may use [`Scheduler<Item, Out, P>`] with any `P: Ord + Clone + Send +
+//! 'static`. Higher values pop first, and equal priorities retain FIFO order.
 //!
 //! Completions are buffered internally; the application drains them with
 //! [`Scheduler::drain`] after receiving an [`crate::events::AppEvent::Scheduler`]
@@ -86,13 +90,19 @@ impl CancellationReport {
     }
 }
 
-pub struct Scheduler<Item: Send + 'static, Out: Send + 'static> {
-    inner: Arc<SchedulerInner<Item, Out>>,
+pub struct Scheduler<
+    Item: Send + 'static,
+    Out: Send + 'static,
+    P: Ord + Clone + Send + 'static = Priority,
+> {
+    inner: Arc<SchedulerInner<Item, Out, P>>,
     handles: Vec<JoinHandle<()>>,
     last_known_total: usize,
 }
 
-impl<Item: Send + 'static, Out: Send + 'static> std::fmt::Debug for Scheduler<Item, Out> {
+impl<Item: Send + 'static, Out: Send + 'static, P: Ord + Clone + Send + 'static> std::fmt::Debug
+    for Scheduler<Item, Out, P>
+{
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Scheduler")
             .field("workers", &self.handles.len())
@@ -101,8 +111,8 @@ impl<Item: Send + 'static, Out: Send + 'static> std::fmt::Debug for Scheduler<It
     }
 }
 
-struct SchedulerInner<Item, Out> {
-    state: Mutex<SchedulerState<Item, Out>>,
+struct SchedulerInner<Item, Out, P> {
+    state: Mutex<SchedulerState<Item, Out, P>>,
     cv: Condvar,
     executor: WorkExecutor<Item, Out>,
     sink: AppEventSender,
@@ -110,8 +120,8 @@ struct SchedulerInner<Item, Out> {
 
 type WorkExecutor<Item, Out> = Box<dyn Fn(&Item) -> Result<Out> + Send + Sync>;
 
-struct SchedulerState<Item, Out> {
-    queue: BinaryHeap<PrioritizedRequest<Item>>,
+struct SchedulerState<Item, Out, P> {
+    queue: BinaryHeap<PrioritizedRequest<Item, P>>,
     queued: HashSet<u64>,
     in_flight: HashMap<u64, RequestScope>,
     completed: HashSet<u64>,
@@ -127,8 +137,8 @@ struct SchedulerState<Item, Out> {
     shutdown: bool,
 }
 
-struct PrioritizedRequest<Item> {
-    priority: Priority,
+struct PrioritizedRequest<Item, P> {
+    priority: P,
     seq: u64,
     id: u64,
     epoch: u64,
@@ -138,18 +148,18 @@ struct PrioritizedRequest<Item> {
     item: Item,
 }
 
-impl<Item> PartialEq for PrioritizedRequest<Item> {
+impl<Item, P: Ord> PartialEq for PrioritizedRequest<Item, P> {
     fn eq(&self, other: &Self) -> bool {
         self.priority == other.priority && self.seq == other.seq
     }
 }
-impl<Item> Eq for PrioritizedRequest<Item> {}
-impl<Item> PartialOrd for PrioritizedRequest<Item> {
+impl<Item, P: Ord> Eq for PrioritizedRequest<Item, P> {}
+impl<Item, P: Ord> PartialOrd for PrioritizedRequest<Item, P> {
     fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
         Some(self.cmp(other))
     }
 }
-impl<Item> Ord for PrioritizedRequest<Item> {
+impl<Item, P: Ord> Ord for PrioritizedRequest<Item, P> {
     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
         self.priority
             .cmp(&other.priority)
@@ -157,7 +167,9 @@ impl<Item> Ord for PrioritizedRequest<Item> {
     }
 }
 
-impl<Item: Send + 'static, Out: Send + 'static> Scheduler<Item, Out> {
+impl<Item: Send + 'static, Out: Send + 'static, P: Ord + Clone + Send + 'static>
+    Scheduler<Item, Out, P>
+{
     pub fn new<F>(workers: usize, sink: AppEventSender, executor: F) -> Self
     where
         F: Fn(&Item) -> Result<Out> + Send + Sync + 'static,
@@ -196,11 +208,11 @@ impl<Item: Send + 'static, Out: Send + 'static> Scheduler<Item, Out> {
         }
     }
 
-    pub fn request(&mut self, id: u64, priority: Priority, item: Item) {
+    pub fn request(&mut self, id: u64, priority: P, item: Item) {
         self.request_scoped(id, priority, item, RequestScope::default());
     }
 
-    pub fn request_scoped(&mut self, id: u64, priority: Priority, item: Item, scope: RequestScope) {
+    pub fn request_scoped(&mut self, id: u64, priority: P, item: Item, scope: RequestScope) {
         let mut state = self.inner.state.lock().unwrap();
         if state.completed.contains(&id)
             || state.in_flight.contains_key(&id)
@@ -360,9 +372,9 @@ impl<Item: Send + 'static, Out: Send + 'static> Scheduler<Item, Out> {
     }
 }
 
-fn cancel_queued_where<Item, Out>(
-    state: &mut SchedulerState<Item, Out>,
-    matches: impl Fn(&PrioritizedRequest<Item>) -> bool,
+fn cancel_queued_where<Item, Out, P: Ord>(
+    state: &mut SchedulerState<Item, Out, P>,
+    matches: impl Fn(&PrioritizedRequest<Item, P>) -> bool,
 ) -> usize {
     let mut kept = BinaryHeap::new();
     let mut cancelled = 0;
@@ -378,7 +390,9 @@ fn cancel_queued_where<Item, Out>(
     cancelled
 }
 
-impl<Item: Send + 'static, Out: Send + 'static> Drop for Scheduler<Item, Out> {
+impl<Item: Send + 'static, Out: Send + 'static, P: Ord + Clone + Send + 'static> Drop
+    for Scheduler<Item, Out, P>
+{
     fn drop(&mut self) {
         {
             let mut state = self.inner.state.lock().unwrap();
@@ -391,7 +405,9 @@ impl<Item: Send + 'static, Out: Send + 'static> Drop for Scheduler<Item, Out> {
     }
 }
 
-fn worker_loop<Item: Send + 'static, Out: Send + 'static>(inner: Arc<SchedulerInner<Item, Out>>) {
+fn worker_loop<Item: Send + 'static, Out: Send + 'static, P: Ord + Clone + Send + 'static>(
+    inner: Arc<SchedulerInner<Item, Out, P>>,
+) {
     loop {
         let request = {
             let mut state = inner.state.lock().unwrap();
@@ -447,7 +463,7 @@ mod tests {
     use std::sync::{mpsc, Arc, Mutex};
     use std::time::Duration;
 
-    fn req(id: u64, priority: Priority, seq: u64) -> PrioritizedRequest<()> {
+    fn req<P: Ord>(id: u64, priority: P, seq: u64) -> PrioritizedRequest<(), P> {
         PrioritizedRequest {
             priority,
             seq,
@@ -462,7 +478,7 @@ mod tests {
 
     #[test]
     fn higher_priority_pops_first() {
-        let mut heap: BinaryHeap<PrioritizedRequest<()>> = BinaryHeap::new();
+        let mut heap: BinaryHeap<PrioritizedRequest<(), Priority>> = BinaryHeap::new();
         heap.push(req(0, Priority::Background, 0));
         heap.push(req(1, Priority::Hover, 1));
         heap.push(req(2, Priority::Active, 2));
@@ -475,12 +491,45 @@ mod tests {
 
     #[test]
     fn fifo_within_priority() {
-        let mut heap: BinaryHeap<PrioritizedRequest<()>> = BinaryHeap::new();
+        let mut heap: BinaryHeap<PrioritizedRequest<(), Priority>> = BinaryHeap::new();
         for seq in 0..3u64 {
             heap.push(req(seq, Priority::Hover, seq));
         }
         let popped: Vec<_> = std::iter::from_fn(|| heap.pop().map(|r| r.id)).collect();
         assert_eq!(popped, vec![0, 1, 2]);
+    }
+
+    #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+    enum CustomPriority {
+        CacheWarmup,
+        UserVisible,
+        Blocking,
+    }
+
+    #[test]
+    fn custom_priority_types_are_supported() {
+        let mut heap: BinaryHeap<PrioritizedRequest<(), CustomPriority>> = BinaryHeap::new();
+        heap.push(req(0, CustomPriority::UserVisible, 0));
+        heap.push(req(1, CustomPriority::CacheWarmup, 1));
+        heap.push(req(2, CustomPriority::Blocking, 2));
+
+        let popped: Vec<_> = std::iter::from_fn(|| heap.pop().map(|r| r.id)).collect();
+
+        assert_eq!(popped, vec![2, 0, 1]);
+    }
+
+    #[test]
+    fn scheduler_accepts_custom_priority_type() {
+        let (tx, rx) = mpsc::channel();
+        let mut sched: Scheduler<i32, i32, CustomPriority> =
+            Scheduler::new(1, tx, |item: &i32| Ok(item * 2));
+
+        sched.request(1, CustomPriority::Blocking, 21);
+        let _ = rx.recv_timeout(Duration::from_secs(1)).unwrap();
+
+        let completions = sched.drain();
+        assert_eq!(completions.len(), 1);
+        assert_eq!(completions[0].result.as_ref().unwrap(), &42);
     }
 
     #[test]
