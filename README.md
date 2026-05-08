@@ -21,7 +21,7 @@ Early. Extracted from [c4tui](https://github.com/scshafe/c4tui) as the reusable 
 | `bar` | `Segment` trait + `SegmentBar` registry — slot-aligned, priority-truncated text bars |
 | `scheduler` | Priority-queue task scheduler with explicit worker config, scoped cancellation, and machine-readable queue/timing stats |
 | `subscription` | Stable source/subscription IDs, declarative subscription requests, explicit unsubscribe bookkeeping, and typed update events for data-source changes |
-| `runtime` | Top-level `RuntimeConfig` bundle that validates terminal, scheduler, theme, tick, and watcher policy before app wiring |
+| `runtime` | Top-level `RuntimeConfig` bundle plus producer handles for validated tick/watcher startup without taking over the app loop |
 | `watcher` | named notify-based file watcher with explicit debounce config, emits `WatcherEvent::WorkspaceChanged { id }` |
 | `tick` | Named periodic tick producers with explicit validation and stop handles |
 | `widgets::list` | Policy-light scrollable list mechanics with optional selection, exposed viewport math, explicit key actions |

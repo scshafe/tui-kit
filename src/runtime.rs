@@ -9,11 +9,12 @@
 use std::collections::BTreeSet;
 
 use crate::config::{ConfigError, Validate};
+use crate::events::AppEventSender;
 use crate::scheduler::SchedulerConfig;
 use crate::terminal::TerminalConfig;
 use crate::theme::ThemeConfig;
-use crate::tick::TickConfig;
-use crate::watcher::WatcherConfig;
+use crate::tick::{self, TickConfig, TickHandle};
+use crate::watcher::{WatcherConfig, WorkspaceWatcher};
 
 /// Explicit validated policy bundle for a tui-kit application runtime.
 ///
@@ -34,7 +35,7 @@ impl RuntimeConfig {
     ///
     /// The caller must still opt into concrete tick and watcher producers with
     /// [`RuntimeConfig::with_tick`] and [`RuntimeConfig::with_watcher`].
-    pub fn strict_wezterm_kitty(worker_count: usize) -> Result<Self, ConfigError> {
+    pub fn strict_wezterm_kitty(worker_count: usize) -> std::result::Result<Self, ConfigError> {
         let config = Self {
             terminal: TerminalConfig::strict_wezterm_kitty(),
             scheduler: SchedulerConfig::explicit(worker_count),
@@ -60,22 +61,80 @@ impl RuntimeConfig {
     }
 
     /// Add a named tick source and revalidate the whole runtime config.
-    pub fn with_tick(mut self, tick: TickConfig) -> Result<Self, ConfigError> {
+    pub fn with_tick(mut self, tick: TickConfig) -> std::result::Result<Self, ConfigError> {
         self.ticks.push(tick);
         self.validate()?;
         Ok(self)
     }
 
     /// Add a named watcher source and revalidate the whole runtime config.
-    pub fn with_watcher(mut self, watcher: WatcherConfig) -> Result<Self, ConfigError> {
+    pub fn with_watcher(
+        mut self,
+        watcher: WatcherConfig,
+    ) -> std::result::Result<Self, ConfigError> {
         self.watchers.push(watcher);
         self.validate()?;
         Ok(self)
     }
+
+    /// Spawn the configured event producers without taking over the app loop.
+    ///
+    /// This starts only the explicitly declared tick and watcher producers and
+    /// returns their handles so applications keep lifecycle ownership. Terminal
+    /// entry, scheduler construction, event dispatch, and domain command
+    /// handling remain app-owned policy.
+    pub fn spawn_producers<UserEvent: Send + 'static>(
+        &self,
+        sink: AppEventSender<UserEvent>,
+    ) -> anyhow::Result<RuntimeProducers> {
+        self.validate()?;
+
+        let mut handles = RuntimeProducers::default();
+        for tick in &self.ticks {
+            handles.ticks.push(tick::spawn(tick.clone(), sink.clone())?);
+        }
+        for watcher in &self.watchers {
+            handles
+                .watchers
+                .push(WorkspaceWatcher::spawn(watcher.clone(), sink.clone())?);
+        }
+        Ok(handles)
+    }
+}
+
+/// Handles for event producers started from a [`RuntimeConfig`].
+///
+/// Dropping this value stops tick producers via their handles and drops watcher
+/// backends. Keep it alive for as long as the app wants runtime events flowing
+/// into the unified channel.
+#[derive(Debug, Default)]
+pub struct RuntimeProducers {
+    pub ticks: Vec<TickHandle>,
+    pub watchers: Vec<WorkspaceWatcher>,
+}
+
+impl RuntimeProducers {
+    pub fn tick_count(&self) -> usize {
+        self.ticks.len()
+    }
+
+    pub fn watcher_count(&self) -> usize {
+        self.watchers.len()
+    }
+
+    /// Stop producers that expose explicit stop handles.
+    ///
+    /// Watchers are stopped by dropping their notify backend when this value is
+    /// consumed; tick producers receive an explicit stop signal before join.
+    pub fn stop(mut self) {
+        for tick in self.ticks.drain(..) {
+            tick.stop();
+        }
+    }
 }
 
 impl Validate for RuntimeConfig {
-    fn validate(&self) -> Result<(), ConfigError> {
+    fn validate(&self) -> std::result::Result<(), ConfigError> {
         self.terminal
             .validate()
             .map_err(prefix("runtime.terminal"))?;
@@ -127,7 +186,9 @@ fn prefix(prefix: impl Into<String>) -> impl FnOnce(ConfigError) -> ConfigError 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::tick::TickStartPolicy;
+    use crate::events::{AppEvent, TickEvent};
+    use crate::tick::{TickSourceId, TickStartPolicy};
+    use std::sync::mpsc;
     use std::time::Duration;
 
     #[test]
@@ -192,5 +253,28 @@ mod tests {
             .unwrap_err();
 
         assert_eq!(err.path, "runtime.ticks[0].TickConfig.interval");
+    }
+
+    #[test]
+    fn runtime_spawns_configured_tick_producers_without_app_loop_policy() {
+        let (tx, rx) = mpsc::channel();
+        let tick = TickConfig {
+            start: TickStartPolicy::Immediate,
+            ..TickConfig::test_fast("paint", Duration::from_secs(1)).unwrap()
+        };
+        let config = RuntimeConfig::headless_test().with_tick(tick).unwrap();
+
+        let handles = config.spawn_producers(tx).unwrap();
+        let event = rx.recv_timeout(Duration::from_secs(1)).unwrap();
+
+        assert_eq!(handles.tick_count(), 1);
+        assert_eq!(handles.watcher_count(), 0);
+        handles.stop();
+        assert_eq!(
+            event,
+            AppEvent::<()>::Tick(TickEvent::Tick {
+                id: TickSourceId::new("paint").unwrap()
+            })
+        );
     }
 }
