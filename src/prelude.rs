@@ -31,7 +31,8 @@ pub use crate::layout::{
     PlacementPolicy, ViewTransform, MAX_SCALE, MIN_SCALE,
 };
 pub use crate::scheduler::{
-    CancellationReport, Completion, Priority, Progress, RequestScope, Scheduler, SchedulerStats,
+    CancellationReport, Completion, Priority, Progress, RequestScope, Scheduler, SchedulerConfig,
+    SchedulerStats,
 };
 pub use crate::terminal::{Terminal, TerminalConfig};
 pub use crate::tick::{

@@ -19,7 +19,7 @@ Early. Extracted from [c4tui](https://github.com/scshafe/c4tui) as the reusable 
 | `image` | `KittyImageRegistry` + `ImageSurface` trait — transmit-once-place-many image lifecycle |
 | `layout` | `PixelSize`, `CellSize`, `CanvasMetrics`, `ViewTransform`, `Placement` — fit/zoom/pan math |
 | `bar` | `Segment` trait + `SegmentBar` registry — slot-aligned, priority-truncated text bars |
-| `scheduler` | Priority-queue task scheduler with scoped cancellation and machine-readable queue stats |
+| `scheduler` | Priority-queue task scheduler with explicit worker config, scoped cancellation, and machine-readable queue/timing stats |
 | `watcher` | notify-based file watcher with debounce, emits `WatcherEvent::WorkspaceChanged` |
 | `tick` | Named periodic tick producers with explicit validation and stop handles |
 | `widgets::list` | Policy-light scrollable list mechanics with optional selection, exposed viewport math, explicit key actions |

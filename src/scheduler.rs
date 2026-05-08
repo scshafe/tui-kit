@@ -14,8 +14,9 @@
 //! [`Scheduler::drain`] after receiving an [`crate::events::AppEvent::Scheduler`]
 //! event carrying [`crate::events::SchedulerEvent::Complete`].
 
+use crate::config::{ConfigError, Validate};
 use crate::events::{AppEvent, AppEventSender};
-use anyhow::Result;
+use anyhow::Result as AnyhowResult;
 use std::collections::{BinaryHeap, HashMap, HashSet, VecDeque};
 use std::sync::{Arc, Condvar, Mutex};
 use std::thread::{self, JoinHandle};
@@ -28,10 +29,37 @@ pub enum Priority {
     Active,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SchedulerConfig {
+    pub worker_count: usize,
+}
+
+impl SchedulerConfig {
+    pub fn explicit(worker_count: usize) -> Self {
+        Self { worker_count }
+    }
+
+    pub fn single_worker() -> Self {
+        Self { worker_count: 1 }
+    }
+}
+
+impl Validate for SchedulerConfig {
+    fn validate(&self) -> Result<(), ConfigError> {
+        if self.worker_count == 0 {
+            return Err(ConfigError::new(
+                "scheduler.worker_count",
+                "must be at least one; use a named preset such as SchedulerConfig::single_worker() or pass an explicit positive count",
+            ));
+        }
+        Ok(())
+    }
+}
+
 #[derive(Debug)]
 pub struct Completion<Out> {
     pub id: u64,
-    pub result: Result<Out>,
+    pub result: AnyhowResult<Out>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
@@ -127,7 +155,7 @@ struct SchedulerInner<Item, Out, P> {
     sink: AppEventSender,
 }
 
-type WorkExecutor<Item, Out> = Box<dyn Fn(&Item) -> Result<Out> + Send + Sync>;
+type WorkExecutor<Item, Out> = Box<dyn Fn(&Item) -> AnyhowResult<Out> + Send + Sync>;
 
 struct SchedulerState<Item, Out, P> {
     queue: BinaryHeap<PrioritizedRequest<Item, P>>,
@@ -190,9 +218,22 @@ impl<Item: Send + 'static, Out: Send + 'static, P: Ord + Clone + Send + 'static>
 {
     pub fn new<F>(workers: usize, sink: AppEventSender, executor: F) -> Self
     where
-        F: Fn(&Item) -> Result<Out> + Send + Sync + 'static,
+        F: Fn(&Item) -> AnyhowResult<Out> + Send + Sync + 'static,
     {
-        let workers = workers.max(1);
+        Self::try_new(SchedulerConfig::explicit(workers), sink, executor)
+            .expect("invalid scheduler config")
+    }
+
+    pub fn try_new<F>(
+        config: SchedulerConfig,
+        sink: AppEventSender,
+        executor: F,
+    ) -> Result<Self, ConfigError>
+    where
+        F: Fn(&Item) -> AnyhowResult<Out> + Send + Sync + 'static,
+    {
+        config.validate()?;
+        let workers = config.worker_count;
         let inner = Arc::new(SchedulerInner {
             state: Mutex::new(SchedulerState {
                 queue: BinaryHeap::new(),
@@ -222,11 +263,11 @@ impl<Item: Send + 'static, Out: Send + 'static, P: Ord + Clone + Send + 'static>
             let inner_t = inner.clone();
             handles.push(thread::spawn(move || worker_loop(inner_t)));
         }
-        Self {
+        Ok(Self {
             inner,
             handles,
             last_known_total: 0,
-        }
+        })
     }
 
     pub fn request(&mut self, id: u64, priority: P, item: Item) {
@@ -592,7 +633,10 @@ mod tests {
     fn scheduler_accepts_custom_priority_type() {
         let (tx, rx) = mpsc::channel();
         let mut sched: Scheduler<i32, i32, CustomPriority> =
-            Scheduler::new(1, tx, |item: &i32| Ok(item * 2));
+            Scheduler::try_new(SchedulerConfig::single_worker(), tx, |item: &i32| {
+                Ok(item * 2)
+            })
+            .unwrap();
 
         sched.request(1, CustomPriority::Blocking, 21);
         let _ = rx.recv_timeout(Duration::from_secs(1)).unwrap();
@@ -600,6 +644,24 @@ mod tests {
         let completions = sched.drain();
         assert_eq!(completions.len(), 1);
         assert_eq!(completions[0].result.as_ref().unwrap(), &42);
+    }
+
+    #[test]
+    fn scheduler_config_rejects_zero_workers() {
+        let (tx, _rx) = mpsc::channel();
+        let err = Scheduler::<i32, i32>::try_new(SchedulerConfig::explicit(0), tx, |item: &i32| {
+            Ok(*item)
+        })
+        .unwrap_err();
+
+        assert_eq!(err.path, "scheduler.worker_count");
+    }
+
+    #[test]
+    #[should_panic(expected = "invalid scheduler config")]
+    fn legacy_new_panics_on_zero_workers_instead_of_silently_clamping() {
+        let (tx, _rx) = mpsc::channel();
+        let _sched: Scheduler<i32, i32> = Scheduler::new(0, tx, |item: &i32| Ok(*item));
     }
 
     #[test]
