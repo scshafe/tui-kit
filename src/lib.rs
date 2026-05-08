@@ -13,15 +13,16 @@
 //!
 //! ## Stability
 //!
-//! Modules used by c4tui (the in-tree consumer) are stable in shape: `bar`,
-//! `events`, `image`, `input`, `input_thread`, `keymap`, `layout`, `scheduler`,
-//! `terminal`, `tty`, `watcher`, `widgets::picker`, `widgets::dialog`.
+//! All public modules have at least one in-tree consumer, either c4tui or a
+//! crate test. The consumer-gate CI job exercises c4tui against the local
+//! tui-kit on every push.
 //!
-//! Modules marked **experimental** at the module level are speculative until a
-//! consumer drives their shape: [`component`], [`focus`]. Their APIs
-//! are likely to change. See `PLAN_REWRITE.md` for the design discipline.
+//! Module-level docs flag specific surfaces that have not yet been
+//! pressure-tested even though their host module has — for example, [`focus`]'s
+//! traversal API is unused by c4tui (which uses the modal stack only).
 //!
-//! See [`prelude`] for the most common imports.
+//! See [`prelude`] for the most common imports. See `PLAN_REWRITE.md` for the
+//! design discipline.
 
 #![warn(missing_debug_implementations)]
 

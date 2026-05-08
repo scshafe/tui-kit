@@ -1,9 +1,8 @@
 //! Optional component primitives for retained-ish, inspectable UI state.
 //!
-//! **Stability: experimental.** No in-tree consumer yet drives these traits.
-//! The shape is plausible but unvalidated. The first c4tui port (likely the
-//! picker via [`BufferComponent`] + [`Cached`]) will pressure-test the surface
-//! and may motivate breaking changes.
+//! **Stability:** consumed by c4tui's `ViewPicker` (via [`BufferComponent`] +
+//! [`Cached`]). The trait shape has been pressure-tested against a real
+//! consumer; further breaking changes should be motivated by additional ports.
 //!
 //! The component layer is intentionally small: it gives applications stable
 //! IDs, explicit dirty-state tracking, and a trait shape for reusable UI
