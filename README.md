@@ -20,7 +20,7 @@ Early. Extracted from [c4tui](https://github.com/scshafe/c4tui) as the reusable 
 | `layout` | `PixelSize`, `CellSize`, `CanvasMetrics`, `ViewTransform`, `Placement` — fit/zoom/pan math |
 | `bar` | `Segment` trait + `SegmentBar` registry — slot-aligned, priority-truncated text bars |
 | `scheduler` | Priority-queue task scheduler with explicit worker config, scoped cancellation, and machine-readable queue/timing stats |
-| `watcher` | notify-based file watcher with debounce, emits `WatcherEvent::WorkspaceChanged` |
+| `watcher` | named notify-based file watcher with explicit debounce config, emits `WatcherEvent::WorkspaceChanged { id }` |
 | `tick` | Named periodic tick producers with explicit validation and stop handles |
 | `widgets::list` | Policy-light scrollable list mechanics with optional selection, exposed viewport math, explicit key actions |
 | `widgets::table` | Policy-light table mechanics with stable row/column IDs, sizing policies, row selection, and vertical/horizontal viewport math |

@@ -40,7 +40,7 @@ pub use crate::tick::{
     TickStartPolicy,
 };
 pub use crate::tty::{stdin_is_terminal, stdout_is_terminal, terminal_metrics, write_stdout_all};
-pub use crate::watcher::WorkspaceWatcher;
+pub use crate::watcher::{WatcherConfig, WatcherSourceId, WorkspaceWatcher};
 pub use crate::widgets::dialog::{
     Dialog, DialogAction, DialogConfig, DialogDismissPolicy, DialogFocusId, DialogFocusPolicy,
     DialogOutcome, DialogState,

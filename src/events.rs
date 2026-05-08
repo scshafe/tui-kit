@@ -13,6 +13,7 @@
 
 use crate::input::Key;
 use crate::tick::TickSourceId;
+use crate::watcher::WatcherSourceId;
 use std::convert::Infallible;
 use std::sync::mpsc::{Receiver, Sender};
 
@@ -52,10 +53,10 @@ pub enum SchedulerEvent {
     Complete,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum WatcherEvent {
-    WorkspaceChanged,
+    WorkspaceChanged { id: WatcherSourceId },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -77,8 +78,8 @@ impl<UserEvent> AppEvent<UserEvent> {
         Self::Scheduler(SchedulerEvent::Complete)
     }
 
-    pub fn workspace_changed() -> Self {
-        Self::Watcher(WatcherEvent::WorkspaceChanged)
+    pub fn workspace_changed(id: WatcherSourceId) -> Self {
+        Self::Watcher(WatcherEvent::WorkspaceChanged { id })
     }
 
     pub fn heartbeat() -> Self {
@@ -112,8 +113,10 @@ mod tests {
             AppEvent::Scheduler(SchedulerEvent::Complete)
         );
         assert_eq!(
-            AppEvent::<Infallible>::workspace_changed(),
-            AppEvent::Watcher(WatcherEvent::WorkspaceChanged)
+            AppEvent::<Infallible>::workspace_changed(WatcherSourceId::new("workspace").unwrap()),
+            AppEvent::Watcher(WatcherEvent::WorkspaceChanged {
+                id: WatcherSourceId::new("workspace").unwrap()
+            })
         );
         assert_eq!(
             AppEvent::<Infallible>::heartbeat(),
