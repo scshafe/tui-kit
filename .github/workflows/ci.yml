@@ -2,7 +2,6 @@ name: CI
 
 on:
   push:
-    branches: [main]
   pull_request:
 
 jobs:
@@ -39,7 +38,10 @@ jobs:
       - uses: actions/checkout@v4
         with:
           repository: scshafe/c4tui
+          ref: ${{ github.ref_name == 'main' && 'main' || 'migrate-to-demolished-tui-kit' }}
           path: c4tui
+          # When tui-kit's main has the new API and c4tui's main has been
+          # migrated, drop the ref override above and let this default to main.
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
         with:
