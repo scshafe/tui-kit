@@ -33,6 +33,12 @@ Early. Extracted from [c4tui](https://github.com/scshafe/c4tui) as the reusable 
 | `testkit` | Deterministic widget buffer rendering, typed event scripts, and mock image surface call recording for tests |
 | `theme` | Explicit named-role theme config with noisy validation for every required style role |
 
+## Examples
+
+| Example | Shows |
+|---|---|
+| `examples/explicit_config_startup.rs` | Starting from a named `RuntimeConfig` preset, adding named tick/watcher producers, validating before side effects, and routing typed events plus app-defined commands through one channel |
+
 ## Out of scope (today)
 
 - Image surfaces other than Kitty graphics (Sixel, iTerm2)
