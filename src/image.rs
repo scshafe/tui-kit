@@ -71,6 +71,47 @@ impl ImageBackendPreference {
     }
 }
 
+/// Explicit image subsystem policy.
+///
+/// This is the public configuration boundary for image behavior. It currently
+/// owns backend selection; placement policy remains per-call via
+/// [`crate::layout::PlacementPolicy`] so apps can choose different behavior for
+/// main images, thumbnails, previews, and other surfaces without baking domain
+/// meaning into the terminal session.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ImageConfig {
+    pub backend: ImageBackendPreference,
+}
+
+impl ImageConfig {
+    /// Strict near-term image preset for Kitty-compatible terminals, including
+    /// WezTerm's Kitty graphics support.
+    pub fn strict_wezterm_kitty() -> Self {
+        Self {
+            backend: ImageBackendPreference::strict_kitty(),
+        }
+    }
+
+    /// Explicit no-image mode for tests or degraded terminals.
+    pub fn degraded_no_images() -> Self {
+        Self {
+            backend: ImageBackendPreference::degraded_no_images(),
+        }
+    }
+
+    /// Headless/inert test preset. This validates like degraded mode and is
+    /// intended for code paths that need image policy without terminal IO.
+    pub fn headless_test() -> Self {
+        Self::degraded_no_images()
+    }
+}
+
+impl Validate for ImageConfig {
+    fn validate(&self) -> Result<(), ConfigError> {
+        self.backend.validate()
+    }
+}
+
 #[derive(Debug)]
 enum SelectedImageSurface {
     Kitty(KittyImageRegistry),
@@ -478,6 +519,28 @@ mod tests {
         .unwrap_err();
 
         assert!(error.reason.contains("degraded fallback"));
+    }
+
+    #[test]
+    fn image_config_presets_are_explicit_and_validated() {
+        let strict = ImageConfig::strict_wezterm_kitty();
+        assert_eq!(strict.backend, ImageBackendPreference::KittyOnly);
+        strict.validate().unwrap();
+
+        let headless = ImageConfig::headless_test();
+        assert_eq!(headless.backend, ImageBackendPreference::Disabled);
+        headless.validate().unwrap();
+    }
+
+    #[test]
+    fn image_config_reports_backend_validation_paths() {
+        let error = ImageConfig {
+            backend: ImageBackendPreference::AutoDetect { order: vec![] },
+        }
+        .validate()
+        .unwrap_err();
+
+        assert_eq!(error.path, "image.backend.order");
     }
 
     #[test]

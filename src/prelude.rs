@@ -18,9 +18,9 @@ pub use crate::focus::{
     FocusConfig, FocusId, FocusManager, FocusNode, FocusScopeKind, FocusTraversal,
 };
 pub use crate::image::{
-    picker_placement_id, ImageBackendPreference, ImageCapabilities, ImageProtocol, ImageSurface,
-    ImageSurfaceRegistry, KittyImageRegistry, NoopImageSurface, PlaceOptions, TransparencySupport,
-    MAIN_PLACEMENT_ID, PICKER_PLACEMENT_ID_BASE,
+    picker_placement_id, ImageBackendPreference, ImageCapabilities, ImageConfig, ImageProtocol,
+    ImageSurface, ImageSurfaceRegistry, KittyImageRegistry, NoopImageSurface, PlaceOptions,
+    TransparencySupport, MAIN_PLACEMENT_ID, PICKER_PLACEMENT_ID_BASE,
 };
 pub use crate::input::Key;
 pub use crate::keymap::{KeyBinding, KeyMap, KeyTrigger, SpecialKey};

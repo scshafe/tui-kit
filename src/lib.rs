@@ -5,7 +5,7 @@
 //! - Optional [`component`] primitives for IDs, dirty tracking, and retained-ish UI.
 //! - Declarative [`keymap`] registry.
 //! - Cell + pixel [`tty`] metrics.
-//! - Image lifecycle via [`image`] surfaces.
+//! - Explicit [`image`] configuration and image lifecycle surfaces.
 //! - Generic placement / fit / pan / zoom math in [`layout`].
 //! - Slot-aligned, priority-truncated text bars in [`bar`].
 //! - Priority-queue [`scheduler`] for async work with explicit worker configuration.

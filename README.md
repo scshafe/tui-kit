@@ -16,7 +16,7 @@ Early. Extracted from [c4tui](https://github.com/scshafe/c4tui) as the reusable 
 | `input_thread` | Detached input thread that pushes `InputEvent::Key` and `TerminalEvent::Resize` into the unified channel |
 | `keymap` | `KeyMap` registry with `KeyTrigger → Command<C>` declarative bindings, last-binding-wins |
 | `tty` | `terminal_metrics()` reading both cell and pixel dimensions via TIOCGWINSZ |
-| `image` | `KittyImageRegistry` + `ImageSurface` trait — transmit-once-place-many image lifecycle |
+| `image` | Explicit `ImageConfig`, backend preferences, `KittyImageRegistry`, and `ImageSurface` lifecycle seams |
 | `layout` | `PixelSize`, `CellSize`, `CanvasMetrics`, `ViewTransform`, `Placement` — fit/zoom/pan math |
 | `bar` | `Segment` trait + `SegmentBar` registry — slot-aligned, priority-truncated text bars |
 | `scheduler` | Priority-queue task scheduler with explicit worker config, scoped cancellation, and machine-readable queue/timing stats |
