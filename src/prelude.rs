@@ -35,6 +35,10 @@ pub use crate::scheduler::{
     SchedulerStats,
 };
 pub use crate::terminal::{Terminal, TerminalConfig};
+pub use crate::testkit::{
+    render_stateful_widget, render_widget, test_area, test_cell_pixels, EventScript, MockImageCall,
+    MockImageSurface,
+};
 pub use crate::theme::{ThemeConfig, ThemeRole, REQUIRED_THEME_ROLES};
 pub use crate::tick::{
     spawn as spawn_tick_source, MissedTickPolicy, TickConfig, TickHandle, TickSourceId,

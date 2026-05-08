@@ -31,6 +31,7 @@ pub mod layout;
 pub mod prelude;
 pub mod scheduler;
 pub mod terminal;
+pub mod testkit;
 pub mod theme;
 pub mod tick;
 pub mod tty;

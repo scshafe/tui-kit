@@ -29,6 +29,7 @@ Early. Extracted from [c4tui](https://github.com/scshafe/c4tui) as the reusable 
 | `widgets::picker` | Generic list-with-detail-and-thumbnails picker, fuzzy filter, scrollable, selection highlight |
 | `widgets::dialog` | Modal rendering plus policy-light dialog state with explicit confirm/cancel/focus actions |
 | `terminal` | `Terminal` wrapping `ratatui::Terminal<CrosstermBackend>` + image registry + raw-mode lifecycle |
+| `testkit` | Deterministic widget buffer rendering, typed event scripts, and mock image surface call recording for tests |
 | `theme` | Explicit named-role theme config with noisy validation for every required style role |
 
 ## Out of scope (today)
