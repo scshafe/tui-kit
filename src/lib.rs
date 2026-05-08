@@ -9,6 +9,7 @@
 //! - Generic placement / fit / pan / zoom math in [`layout`].
 //! - Slot-aligned, priority-truncated text bars in [`bar`].
 //! - Priority-queue [`scheduler`] for async work with explicit worker configuration.
+//! - Explicit [`subscription`] IDs and update events for data-source changes.
 //! - Top-level [`runtime`] configuration for validated subsystem policy bundles.
 //! - Named-role [`theme`] configuration with noisy validation.
 //! - File [`watcher`] integration.
@@ -32,6 +33,7 @@ pub mod layout;
 pub mod prelude;
 pub mod runtime;
 pub mod scheduler;
+pub mod subscription;
 pub mod terminal;
 pub mod testkit;
 pub mod theme;

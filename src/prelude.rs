@@ -35,6 +35,10 @@ pub use crate::scheduler::{
     CancellationReport, Completion, Priority, Progress, RequestScope, Scheduler, SchedulerConfig,
     SchedulerStats,
 };
+pub use crate::subscription::{
+    SourceId, SubscriptionHandle, SubscriptionId, SubscriptionRegistry, SubscriptionReport,
+    UpdateEvent,
+};
 pub use crate::terminal::{Terminal, TerminalConfig};
 pub use crate::testkit::{
     render_stateful_widget, render_widget, test_area, test_cell_pixels, EventScript, MockImageCall,

@@ -12,6 +12,7 @@
 //! top-level event enum become an unstructured junk drawer.
 
 use crate::input::Key;
+use crate::subscription::UpdateEvent;
 use crate::tick::TickSourceId;
 use crate::watcher::WatcherSourceId;
 use std::convert::Infallible;
@@ -26,6 +27,7 @@ pub enum AppEvent<UserEvent = Infallible> {
     Scheduler(SchedulerEvent),
     Watcher(WatcherEvent),
     Tick(TickEvent),
+    Update(UpdateEvent),
     User(UserEvent),
 }
 
@@ -89,6 +91,10 @@ impl<UserEvent> AppEvent<UserEvent> {
     pub fn tick(id: TickSourceId) -> Self {
         Self::Tick(TickEvent::Tick { id })
     }
+
+    pub fn update(event: UpdateEvent) -> Self {
+        Self::Update(event)
+    }
 }
 
 pub type AppEventSender<UserEvent = Infallible> = Sender<AppEvent<UserEvent>>;
@@ -126,6 +132,14 @@ mod tests {
             AppEvent::<Infallible>::tick(TickSourceId::new("ui").unwrap()),
             AppEvent::Tick(TickEvent::Tick {
                 id: TickSourceId::new("ui").unwrap()
+            })
+        );
+        assert_eq!(
+            AppEvent::<Infallible>::update(UpdateEvent::SourceChanged {
+                source: crate::subscription::SourceId::new("workspace").unwrap()
+            }),
+            AppEvent::Update(UpdateEvent::SourceChanged {
+                source: crate::subscription::SourceId::new("workspace").unwrap()
             })
         );
     }
