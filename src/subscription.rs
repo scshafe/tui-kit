@@ -73,6 +73,23 @@ impl SubscriptionHandle {
     }
 }
 
+/// Declarative request for updates from a data source.
+///
+/// Components can expose these requests for app/runtime code to inspect and
+/// apply explicitly. A request is inert data: constructing or dropping it does
+/// not subscribe, unsubscribe, spawn workers, or imply a dependency graph.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SubscriptionRequest {
+    pub id: SubscriptionId,
+    pub source: SourceId,
+}
+
+impl SubscriptionRequest {
+    pub fn new(id: SubscriptionId, source: SourceId) -> Self {
+        Self { id, source }
+    }
+}
+
 /// Explicit subscription bookkeeping.
 ///
 /// Dropping a [`SubscriptionHandle`] has no side effects. Apps must call
@@ -102,6 +119,13 @@ impl SubscriptionRegistry {
 
         self.subscriptions.insert(id.clone(), source.clone());
         Ok(SubscriptionHandle { id, source })
+    }
+
+    pub fn subscribe_request(
+        &mut self,
+        request: SubscriptionRequest,
+    ) -> Result<SubscriptionHandle, ConfigError> {
+        self.subscribe(request.id, request.source)
     }
 
     pub fn unsubscribe(&mut self, id: &SubscriptionId) -> SubscriptionReport {
@@ -224,6 +248,21 @@ mod tests {
             err,
             ConfigError::new("subscriptions.view", "duplicate subscription id")
         );
+    }
+
+    #[test]
+    fn subscription_requests_are_inert_until_explicitly_applied() {
+        let source = SourceId::new("workspace").unwrap();
+        let id = SubscriptionId::new("side-panel").unwrap();
+        let request = SubscriptionRequest::new(id.clone(), source.clone());
+        let mut registry = SubscriptionRegistry::new();
+
+        assert!(registry.is_empty());
+
+        let handle = registry.subscribe_request(request).unwrap();
+
+        assert_eq!(handle, SubscriptionHandle { id, source });
+        assert_eq!(registry.len(), 1);
     }
 
     #[test]

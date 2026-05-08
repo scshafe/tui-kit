@@ -7,7 +7,7 @@
 pub use crate::bar::{Segment, SegmentBar, SegmentSlot, StatusFragment};
 pub use crate::component::{
     BufferComponent, Cached, CachedRenderStats, Component, ComponentChildren, ComponentId,
-    ComponentOutcome, DirtyReason, DirtyState,
+    ComponentOutcome, ComponentSubscriptions, DirtyReason, DirtyState,
 };
 pub use crate::config::{ConfigError, KitConfig, Validate};
 pub use crate::events::{
@@ -37,7 +37,7 @@ pub use crate::scheduler::{
 };
 pub use crate::subscription::{
     SourceId, SubscriptionHandle, SubscriptionId, SubscriptionRegistry, SubscriptionReport,
-    UpdateEvent,
+    SubscriptionRequest, UpdateEvent,
 };
 pub use crate::terminal::{Terminal, TerminalConfig};
 pub use crate::testkit::{

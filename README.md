@@ -11,7 +11,7 @@ Early. Extracted from [c4tui](https://github.com/scshafe/c4tui) as the reusable 
 | Module | Provides |
 |---|---|
 | `events` | Typed `AppEvent<UserEvent>` categories + unified channel: input, terminal, scheduler, watcher, tick, update, runtime/user events |
-| `component` | Optional component traits, stable IDs, focus node handles, explicit dirty-state invalidation, and safe buffer caching for opt-in components |
+| `component` | Optional component traits, stable IDs, focus node handles, inert subscription declarations, explicit dirty-state invalidation, and safe buffer caching for opt-in components |
 | `input` | `Key` enum mapped from crossterm events |
 | `input_thread` | Detached input thread that pushes `InputEvent::Key` and `TerminalEvent::Resize` into the unified channel |
 | `keymap` | `KeyMap` registry with `KeyTrigger → Command<C>` declarative bindings, last-binding-wins |
@@ -20,7 +20,7 @@ Early. Extracted from [c4tui](https://github.com/scshafe/c4tui) as the reusable 
 | `layout` | `PixelSize`, `CellSize`, `CanvasMetrics`, `ViewTransform`, `Placement` — fit/zoom/pan math |
 | `bar` | `Segment` trait + `SegmentBar` registry — slot-aligned, priority-truncated text bars |
 | `scheduler` | Priority-queue task scheduler with explicit worker config, scoped cancellation, and machine-readable queue/timing stats |
-| `subscription` | Stable source/subscription IDs, explicit unsubscribe bookkeeping, and typed update events for data-source changes |
+| `subscription` | Stable source/subscription IDs, declarative subscription requests, explicit unsubscribe bookkeeping, and typed update events for data-source changes |
 | `runtime` | Top-level `RuntimeConfig` bundle that validates terminal, scheduler, theme, tick, and watcher policy before app wiring |
 | `watcher` | named notify-based file watcher with explicit debounce config, emits `WatcherEvent::WorkspaceChanged { id }` |
 | `tick` | Named periodic tick producers with explicit validation and stop handles |

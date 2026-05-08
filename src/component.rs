@@ -10,6 +10,7 @@ use ratatui::{buffer::Buffer, layout::Rect};
 use serde::{Deserialize, Serialize};
 
 use crate::focus::FocusNode;
+use crate::subscription::SubscriptionRequest;
 
 /// Stable identifier for a component instance.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
@@ -167,6 +168,9 @@ impl<Message> ComponentOutcome<Message> {
 /// Lightweight child list for component tree inspection.
 pub type ComponentChildren<'a> = &'a [ComponentId];
 
+/// Inert subscription declarations exposed by a component.
+pub type ComponentSubscriptions<'a> = &'a [SubscriptionRequest];
+
 /// Optional trait for reusable UI mechanics.
 ///
 /// Rendering remains ratatui-native. Apps may ignore this trait entirely and
@@ -195,6 +199,10 @@ pub trait Component {
     }
 
     fn children(&self) -> ComponentChildren<'_> {
+        &[]
+    }
+
+    fn subscriptions(&self) -> ComponentSubscriptions<'_> {
         &[]
     }
 }
@@ -230,6 +238,10 @@ pub trait BufferComponent {
     }
 
     fn children(&self) -> ComponentChildren<'_> {
+        &[]
+    }
+
+    fn subscriptions(&self) -> ComponentSubscriptions<'_> {
         &[]
     }
 }
@@ -363,6 +375,10 @@ where
     fn children(&self) -> ComponentChildren<'_> {
         self.inner.children()
     }
+
+    fn subscriptions(&self) -> ComponentSubscriptions<'_> {
+        self.inner.subscriptions()
+    }
 }
 
 fn blit(source: &Buffer, target: &mut Buffer) {
@@ -426,6 +442,7 @@ mod tests {
         id: ComponentId,
         dirty: DirtyState,
         renders: usize,
+        subscriptions: Vec<SubscriptionRequest>,
     }
 
     impl CountingBufferComponent {
@@ -434,7 +451,13 @@ mod tests {
                 id: ComponentId::new("counter"),
                 dirty: DirtyState::paint(DirtyReason::Explicit),
                 renders: 0,
+                subscriptions: Vec::new(),
             }
+        }
+
+        fn with_subscription(mut self, request: SubscriptionRequest) -> Self {
+            self.subscriptions.push(request);
+            self
         }
     }
 
@@ -469,6 +492,10 @@ mod tests {
 
         fn clear_dirty(&mut self) {
             self.dirty.clear();
+        }
+
+        fn subscriptions(&self) -> ComponentSubscriptions<'_> {
+            &self.subscriptions
         }
     }
 
@@ -505,5 +532,16 @@ mod tests {
         assert_eq!(cached.stats().renders, 3);
         assert_eq!(cached.cached_area(), Some(larger));
         Ok(())
+    }
+
+    #[test]
+    fn cached_component_forwards_inert_subscription_declarations() {
+        let request = SubscriptionRequest::new(
+            crate::subscription::SubscriptionId::new("visible-files").unwrap(),
+            crate::subscription::SourceId::new("workspace").unwrap(),
+        );
+        let cached = Cached::new(CountingBufferComponent::new().with_subscription(request.clone()));
+
+        assert_eq!(cached.subscriptions(), &[request]);
     }
 }
