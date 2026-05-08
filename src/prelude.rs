@@ -35,6 +35,7 @@ pub use crate::scheduler::{
     SchedulerStats,
 };
 pub use crate::terminal::{Terminal, TerminalConfig};
+pub use crate::theme::{ThemeConfig, ThemeRole, REQUIRED_THEME_ROLES};
 pub use crate::tick::{
     spawn as spawn_tick_source, MissedTickPolicy, TickConfig, TickHandle, TickSourceId,
     TickStartPolicy,

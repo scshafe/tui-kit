@@ -9,6 +9,7 @@
 //! - Generic placement / fit / pan / zoom math in [`layout`].
 //! - Slot-aligned, priority-truncated text bars in [`bar`].
 //! - Priority-queue [`scheduler`] for async work with explicit worker configuration.
+//! - Named-role [`theme`] configuration with noisy validation.
 //! - File [`watcher`] integration.
 //! - Composed [`widgets`] (list, table, tree, tabs, picker, dialog) and a [`terminal`] session wrapper.
 //!
@@ -30,6 +31,7 @@ pub mod layout;
 pub mod prelude;
 pub mod scheduler;
 pub mod terminal;
+pub mod theme;
 pub mod tick;
 pub mod tty;
 pub mod watcher;

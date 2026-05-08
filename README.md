@@ -29,13 +29,14 @@ Early. Extracted from [c4tui](https://github.com/scshafe/c4tui) as the reusable 
 | `widgets::picker` | Generic list-with-detail-and-thumbnails picker, fuzzy filter, scrollable, selection highlight |
 | `widgets::dialog` | Modal rendering plus policy-light dialog state with explicit confirm/cancel/focus actions |
 | `terminal` | `Terminal` wrapping `ratatui::Terminal<CrosstermBackend>` + image registry + raw-mode lifecycle |
+| `theme` | Explicit named-role theme config with noisy validation for every required style role |
 
 ## Out of scope (today)
 
 - Image surfaces other than Kitty graphics (Sixel, iTerm2)
 - Async runtimes (tokio/async-std) — uses sync threads + channels
 - Full component tree runtime orchestration
-- Theming system, plugin loading, etc.
+- Plugin loading and full design-system abstractions
 
 ## License
 
