@@ -10,7 +10,7 @@ Early. Extracted from [c4tui](https://github.com/scshafe/c4tui) as the reusable 
 
 | Module | Provides | Consumer |
 |---|---|---|
-| `events` | Typed `AppEvent<UserEvent>` categories + unified channel: input, terminal, scheduler, watcher, tick, runtime/user events | c4tui |
+| `events` | Typed `AppEvent<UserEvent>` categories + unified channel: input, terminal, scheduler, watcher, user events | c4tui |
 | `component` | Optional `Component` / `BufferComponent` traits, `ComponentId`, dirty-state invalidation, `Cached<C>` buffer caching | _probationary — pending c4tui port_ |
 | `focus` | `FocusManager` with stack-based modal/capturing scopes | _probationary — pending c4tui port_ |
 | `input` | `Key` enum mapped from crossterm events | c4tui |
@@ -22,7 +22,6 @@ Early. Extracted from [c4tui](https://github.com/scshafe/c4tui) as the reusable 
 | `bar` | `Segment` trait + `SegmentBar` registry — slot-aligned, priority-truncated text bars | c4tui |
 | `scheduler` | Priority-queue task scheduler with custom-priority generic, scoped cancellation, machine-readable queue/timing stats | c4tui |
 | `watcher` | notify-based file watcher with debounce, emits `WatcherEvent::WorkspaceChanged` | c4tui |
-| `tick` | Named periodic tick producers with stop handles | _probationary — pending c4tui port_ |
 | `widgets::picker` | Generic list-with-detail-and-thumbnails picker, fuzzy filter, scrollable, selection highlight | c4tui |
 | `widgets::dialog` | Modal rendering plus policy-light dialog state with explicit confirm/cancel/focus actions | c4tui |
 | `terminal` | `Terminal` wrapping `ratatui::Terminal<CrosstermBackend>` + image registry + raw-mode lifecycle | c4tui |

@@ -1,7 +1,7 @@
 //! tui-kit — opinionated middleware for terminal UI applications.
 //!
 //! Sits on top of [`ratatui`] and [`crossterm`]. Provides:
-//! - Unified [`events`] channel + producers (input, watcher, scheduler, ticks).
+//! - Unified [`events`] channel + producers (input, watcher, scheduler).
 //! - Declarative [`keymap`] registry.
 //! - Cell + pixel [`tty`] metrics.
 //! - Image lifecycle surfaces in [`image`].
@@ -18,7 +18,7 @@
 //! `terminal`, `tty`, `watcher`, `widgets::picker`, `widgets::dialog`.
 //!
 //! Modules marked **experimental** at the module level are speculative until a
-//! consumer drives their shape: [`component`], [`focus`], [`tick`]. Their APIs
+//! consumer drives their shape: [`component`], [`focus`]. Their APIs
 //! are likely to change. See `PLAN_REWRITE.md` for the design discipline.
 //!
 //! See [`prelude`] for the most common imports.
@@ -39,7 +39,6 @@ pub mod prelude;
 pub mod scheduler;
 pub mod terminal;
 pub mod testkit;
-pub mod tick;
 pub mod tty;
 pub mod watcher;
 pub mod widgets;

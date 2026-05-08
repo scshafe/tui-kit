@@ -11,8 +11,8 @@ pub use crate::component::{
 };
 pub use crate::config::{ConfigError, KitConfig, Validate};
 pub use crate::events::{
-    AppEvent, AppEventReceiver, AppEventSender, InputEvent, RuntimeEvent, SchedulerEvent,
-    TerminalEvent, TickEvent, WatcherEvent,
+    AppEvent, AppEventReceiver, AppEventSender, InputEvent, SchedulerEvent, TerminalEvent,
+    WatcherEvent,
 };
 pub use crate::focus::{
     FocusConfig, FocusId, FocusManager, FocusNode, FocusScopeKind, FocusTraversal,
@@ -37,10 +37,6 @@ pub use crate::terminal::{Terminal, TerminalConfig};
 pub use crate::testkit::{
     render_stateful_widget, render_widget, test_area, test_cell_pixels, DeterministicScheduler,
     EventScript, MockImageCall, MockImageSurface,
-};
-pub use crate::tick::{
-    spawn as spawn_tick_source, MissedTickPolicy, TickConfig, TickHandle, TickSourceId,
-    TickStartPolicy,
 };
 pub use crate::tty::{stdin_is_terminal, stdout_is_terminal, terminal_metrics, write_stdout_all};
 pub use crate::watcher::WorkspaceWatcher;
