@@ -12,9 +12,7 @@
 //! top-level event enum become an unstructured junk drawer.
 
 use crate::input::Key;
-use crate::subscription::UpdateEvent;
 use crate::tick::TickSourceId;
-use crate::watcher::WatcherSourceId;
 use std::convert::Infallible;
 use std::sync::mpsc::{Receiver, Sender};
 
@@ -27,7 +25,6 @@ pub enum AppEvent<UserEvent = Infallible> {
     Scheduler(SchedulerEvent),
     Watcher(WatcherEvent),
     Tick(TickEvent),
-    Update(UpdateEvent),
     User(UserEvent),
 }
 
@@ -55,10 +52,10 @@ pub enum SchedulerEvent {
     Complete,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum WatcherEvent {
-    WorkspaceChanged { id: WatcherSourceId },
+    WorkspaceChanged,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -80,8 +77,8 @@ impl<UserEvent> AppEvent<UserEvent> {
         Self::Scheduler(SchedulerEvent::Complete)
     }
 
-    pub fn workspace_changed(id: WatcherSourceId) -> Self {
-        Self::Watcher(WatcherEvent::WorkspaceChanged { id })
+    pub fn workspace_changed() -> Self {
+        Self::Watcher(WatcherEvent::WorkspaceChanged)
     }
 
     pub fn heartbeat() -> Self {
@@ -90,10 +87,6 @@ impl<UserEvent> AppEvent<UserEvent> {
 
     pub fn tick(id: TickSourceId) -> Self {
         Self::Tick(TickEvent::Tick { id })
-    }
-
-    pub fn update(event: UpdateEvent) -> Self {
-        Self::Update(event)
     }
 }
 
@@ -119,10 +112,8 @@ mod tests {
             AppEvent::Scheduler(SchedulerEvent::Complete)
         );
         assert_eq!(
-            AppEvent::<Infallible>::workspace_changed(WatcherSourceId::new("workspace").unwrap()),
-            AppEvent::Watcher(WatcherEvent::WorkspaceChanged {
-                id: WatcherSourceId::new("workspace").unwrap()
-            })
+            AppEvent::<Infallible>::workspace_changed(),
+            AppEvent::Watcher(WatcherEvent::WorkspaceChanged)
         );
         assert_eq!(
             AppEvent::<Infallible>::heartbeat(),
@@ -132,14 +123,6 @@ mod tests {
             AppEvent::<Infallible>::tick(TickSourceId::new("ui").unwrap()),
             AppEvent::Tick(TickEvent::Tick {
                 id: TickSourceId::new("ui").unwrap()
-            })
-        );
-        assert_eq!(
-            AppEvent::<Infallible>::update(UpdateEvent::SourceChanged {
-                source: crate::subscription::SourceId::new("workspace").unwrap()
-            }),
-            AppEvent::Update(UpdateEvent::SourceChanged {
-                source: crate::subscription::SourceId::new("workspace").unwrap()
             })
         );
     }

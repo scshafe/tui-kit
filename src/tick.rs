@@ -1,7 +1,11 @@
 //! Periodic tick producers for the unified event channel.
 //!
-//! Ticks are named so applications and agents can route timer wake-ups without
-//! guessing which loop or subsystem produced them. A [`TickHandle`] stops the
+//! **Stability: experimental.** No in-tree consumer yet uses `TickConfig`.
+//! The first c4tui port (replacing `RuntimeEvent::Heartbeat` with a tick source)
+//! will pressure-test the policy choices.
+//!
+//! Ticks are named so applications can route timer wake-ups without guessing
+//! which loop or subsystem produced them. A [`TickHandle`] stops the
 //! background thread explicitly on drop or via [`TickHandle::stop`].
 
 use crate::config::{ConfigError, Validate};
@@ -62,7 +66,6 @@ pub struct TickConfig {
     pub interval: Duration,
     pub start: TickStartPolicy,
     pub missed_tick_policy: MissedTickPolicy,
-    pub allow_subproduction_interval_for_tests: bool,
 }
 
 impl TickConfig {
@@ -76,27 +79,29 @@ impl TickConfig {
             interval,
             start,
             missed_tick_policy: MissedTickPolicy::Coalesce,
-            allow_subproduction_interval_for_tests: false,
         };
-        config.validate()?;
+        config.validate_production()?;
         Ok(config)
     }
 
-    pub fn test_fast(id: impl Into<String>, interval: Duration) -> Result<Self, ConfigError> {
+    /// Test-only fast tick. Bypasses the production-minimum interval check so
+    /// unit tests can drive sub-10ms ticks. Not exposed to consumers.
+    #[cfg(test)]
+    pub(crate) fn test_fast(
+        id: impl Into<String>,
+        interval: Duration,
+    ) -> Result<Self, ConfigError> {
         let config = Self {
             id: TickSourceId::new(id)?,
             interval,
             start: TickStartPolicy::AfterInterval,
             missed_tick_policy: MissedTickPolicy::Coalesce,
-            allow_subproduction_interval_for_tests: true,
         };
-        config.validate()?;
+        config.validate_basic()?;
         Ok(config)
     }
-}
 
-impl Validate for TickConfig {
-    fn validate(&self) -> Result<(), ConfigError> {
+    fn validate_basic(&self) -> Result<(), ConfigError> {
         self.id.validate()?;
         if self.interval.is_zero() {
             return Err(ConfigError::new(
@@ -104,13 +109,24 @@ impl Validate for TickConfig {
                 "must be greater than zero",
             ));
         }
-        if !self.allow_subproduction_interval_for_tests && self.interval < MIN_PRODUCTION_INTERVAL {
+        Ok(())
+    }
+
+    fn validate_production(&self) -> Result<(), ConfigError> {
+        self.validate_basic()?;
+        if self.interval < MIN_PRODUCTION_INTERVAL {
             return Err(ConfigError::new(
                 "TickConfig.interval",
-                "must be at least 10ms unless explicitly marked as a test-fast tick source",
+                "must be at least 10ms",
             ));
         }
         Ok(())
+    }
+}
+
+impl Validate for TickConfig {
+    fn validate(&self) -> Result<(), ConfigError> {
+        self.validate_production()
     }
 }
 
@@ -159,8 +175,6 @@ pub fn spawn<UserEvent: Send + 'static>(
     config: TickConfig,
     sink: AppEventSender<UserEvent>,
 ) -> Result<TickHandle, ConfigError> {
-    config.validate()?;
-
     let stopped = Arc::new(AtomicBool::new(false));
     let thread_stopped = Arc::clone(&stopped);
     let thread = thread::Builder::new()

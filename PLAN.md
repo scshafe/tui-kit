@@ -1,5 +1,40 @@
 # tui-kit — AI-First Roadmap and Interface Plan
 
+> **Feedback-loop correction (supersedes earlier sections of this document).**
+>
+> This document was the source of a speculative-build pattern: most of its
+> ambitions were implemented as primitives without consumer pressure. The
+> codebase has since been demolished back to the API floor that c4tui actually
+> consumes. See `PLAN_REWRITE.md` for the current discipline.
+>
+> **The new rule:** before adding a public module to tui-kit, name the consumer
+> that will use it within this commit (or the immediately following commit on
+> the c4tui side). If the answer is "the dashboard might want it" or "this is
+> obviously useful," that is the speculative pattern again. Stop, and add the
+> consumer first.
+>
+> **Modules currently on probation** (in tree, no consumer): `component`,
+> `focus`, `tick`. Their docs say `Stability: experimental`. They will earn
+> stability when c4tui ports the picker (Component+Cached), the modal routing
+> (Focus), and the heartbeat (Tick) onto them — _and_ those ports survive a
+> review.
+>
+> **Modules deliberately removed** (will re-enter only with named consumers):
+> `widgets::list`, `widgets::table`, `widgets::tree`, `widgets::tabs`, `theme`,
+> `runtime`, `subscription`, `ImageConfig`, `WatcherConfig`, `SchedulerConfig`.
+>
+> **Process gates** (see `.github/workflows/ci.yml`):
+> - `cargo fmt --check`, `clippy -D warnings`, `cargo test`, `cargo doc --no-deps`
+>   on tui-kit
+> - `cargo check && cargo test` on c4tui against the local tui-kit
+>
+> If the consumer-gate is red, the tui-kit change does not land. This replaces
+> "API will change" as the discipline.
+>
+> Read the rest of this document as historical roadmap notes, not as a backlog.
+
+---
+
 This file is the working product/API plan for `tui-kit`. It intentionally prioritizes library power, explicit behavior, flexible mechanics, and machine/agent readability over near-term refactor effort or human-readable minimalism.
 
 ## North star

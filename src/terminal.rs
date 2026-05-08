@@ -17,7 +17,7 @@
 //! selected image backend cleanup so no image placements leak.
 
 use crate::config::{ConfigError, Validate};
-use crate::image::{ImageBackendPreference, ImageConfig, ImageSurfaceRegistry};
+use crate::image::{ImageBackendPreference, ImageSurfaceRegistry};
 use crate::layout::CanvasMetrics;
 use crate::tty::terminal_metrics;
 use anyhow::Result;
@@ -30,12 +30,12 @@ type Inner = ratatui::Terminal<CrosstermBackend<Stdout>>;
 
 /// Explicit runtime policy for entering a live terminal session.
 ///
-/// Use named constructors instead of invisible defaults so applications and
-/// agents can choose image behavior deliberately before raw mode or the
-/// alternate screen are enabled.
+/// Use named constructors instead of invisible defaults so applications can
+/// choose image behavior deliberately before raw mode or the alternate screen
+/// are enabled.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TerminalConfig {
-    pub image: ImageConfig,
+    pub image_backend: ImageBackendPreference,
 }
 
 impl TerminalConfig {
@@ -43,14 +43,14 @@ impl TerminalConfig {
     /// WezTerm's Kitty graphics support.
     pub fn strict_wezterm_kitty() -> Self {
         Self {
-            image: ImageConfig::strict_wezterm_kitty(),
+            image_backend: ImageBackendPreference::strict_kitty(),
         }
     }
 
     /// Explicit no-image mode for tests or degraded terminals.
     pub fn degraded_no_images() -> Self {
         Self {
-            image: ImageConfig::degraded_no_images(),
+            image_backend: ImageBackendPreference::degraded_no_images(),
         }
     }
 
@@ -64,7 +64,7 @@ impl TerminalConfig {
 
 impl Validate for TerminalConfig {
     fn validate(&self) -> Result<(), ConfigError> {
-        self.image.validate()
+        self.image_backend.validate()
     }
 }
 
@@ -95,7 +95,7 @@ impl Terminal {
     /// currently unimplemented protocols fail before terminal setup begins.
     pub fn enter_with_config(config: TerminalConfig) -> Result<Self> {
         config.validate()?;
-        let images = ImageSurfaceRegistry::from_preference(config.image.backend)?;
+        let images = ImageSurfaceRegistry::from_preference(config.image_backend)?;
         crossterm::terminal::enable_raw_mode()?;
         let mut stdout = io::stdout();
         crossterm::execute!(
@@ -109,15 +109,6 @@ impl Terminal {
         Ok(Self {
             inner: Some(inner),
             images,
-        })
-    }
-
-    /// Enter raw mode with an explicit image backend preference.
-    pub fn enter_with_image_backend(image_backend: ImageBackendPreference) -> Result<Self> {
-        Self::enter_with_config(TerminalConfig {
-            image: ImageConfig {
-                backend: image_backend,
-            },
         })
     }
 
@@ -165,18 +156,16 @@ mod tests {
     #[test]
     fn terminal_config_presets_are_explicit() {
         let strict = TerminalConfig::strict_wezterm_kitty();
-        assert_eq!(strict.image.backend, ImageBackendPreference::KittyOnly);
+        assert_eq!(strict.image_backend, ImageBackendPreference::KittyOnly);
 
         let headless = TerminalConfig::headless_test();
-        assert_eq!(headless.image.backend, ImageBackendPreference::Disabled);
+        assert_eq!(headless.image_backend, ImageBackendPreference::Disabled);
     }
 
     #[test]
     fn terminal_config_validates_image_backend_policy() {
         let error = TerminalConfig {
-            image: ImageConfig {
-                backend: ImageBackendPreference::AutoDetect { order: vec![] },
-            },
+            image_backend: ImageBackendPreference::AutoDetect { order: vec![] },
         }
         .validate()
         .unwrap_err();
@@ -187,10 +176,8 @@ mod tests {
     #[test]
     fn terminal_config_rejects_noop_as_detectable_protocol() {
         let error = TerminalConfig {
-            image: ImageConfig {
-                backend: ImageBackendPreference::AutoDetect {
-                    order: vec![ImageProtocol::Noop],
-                },
+            image_backend: ImageBackendPreference::AutoDetect {
+                order: vec![ImageProtocol::Noop],
             },
         }
         .validate()

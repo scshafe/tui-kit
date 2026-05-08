@@ -1,7 +1,11 @@
 //! Explicit focus traversal and modal capture primitives.
 //!
-//! Focus remains policy-light: apps decide which events mean “move focus” or
-//! “activate”; `tui-kit` provides stable IDs, inspectable scopes, traversal
+//! **Stability: experimental.** No in-tree consumer yet drives `FocusManager`.
+//! The first c4tui port (rewiring mode-based event routing through this module)
+//! will pressure-test the scope/traversal model.
+//!
+//! Focus remains policy-light: apps decide which events mean "move focus" or
+//! "activate"; `tui-kit` provides stable IDs, inspectable scopes, traversal
 //! mechanics, and noisy validation for ambiguous focus graphs.
 
 use serde::{Deserialize, Serialize};

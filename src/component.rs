@@ -1,5 +1,10 @@
 //! Optional component primitives for retained-ish, inspectable UI state.
 //!
+//! **Stability: experimental.** No in-tree consumer yet drives these traits.
+//! The shape is plausible but unvalidated. The first c4tui port (likely the
+//! picker via [`BufferComponent`] + [`Cached`]) will pressure-test the surface
+//! and may motivate breaking changes.
+//!
 //! The component layer is intentionally small: it gives applications stable
 //! IDs, explicit dirty-state tracking, and a trait shape for reusable UI
 //! mechanics without hiding ratatui or requiring apps to adopt a framework.
@@ -10,7 +15,6 @@ use ratatui::{buffer::Buffer, layout::Rect};
 use serde::{Deserialize, Serialize};
 
 use crate::focus::FocusNode;
-use crate::subscription::SubscriptionRequest;
 
 /// Stable identifier for a component instance.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
@@ -168,9 +172,6 @@ impl<Message> ComponentOutcome<Message> {
 /// Lightweight child list for component tree inspection.
 pub type ComponentChildren<'a> = &'a [ComponentId];
 
-/// Inert subscription declarations exposed by a component.
-pub type ComponentSubscriptions<'a> = &'a [SubscriptionRequest];
-
 /// Optional trait for reusable UI mechanics.
 ///
 /// Rendering remains ratatui-native. Apps may ignore this trait entirely and
@@ -199,10 +200,6 @@ pub trait Component {
     }
 
     fn children(&self) -> ComponentChildren<'_> {
-        &[]
-    }
-
-    fn subscriptions(&self) -> ComponentSubscriptions<'_> {
         &[]
     }
 }
@@ -240,17 +237,17 @@ pub trait BufferComponent {
     fn children(&self) -> ComponentChildren<'_> {
         &[]
     }
-
-    fn subscriptions(&self) -> ComponentSubscriptions<'_> {
-        &[]
-    }
 }
 
 /// Machine-readable render cache counters for [`Cached`].
+///
+/// `cache_misses` counts inner-component renders that populated the cache.
+/// `cache_hits` counts replays that served the cached buffer without re-rendering.
+/// Their sum is the total number of [`Cached::render_to_buffer`] calls.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CachedRenderStats {
-    pub renders: u64,
-    pub replays: u64,
+    pub cache_misses: u64,
+    pub cache_hits: u64,
 }
 
 /// Cached wrapper for buffer-native components.
@@ -309,26 +306,23 @@ where
     C: BufferComponent,
 {
     pub fn render_to_buffer(&mut self, area: Rect, target: &mut Buffer) -> anyhow::Result<()> {
-        self.ensure_cache(area)?;
+        let needs_render = {
+            let area_changed = self.cached_area != Some(area);
+            self.cache.is_none() || area_changed || !self.inner.dirty().is_clean()
+        };
+        if needs_render {
+            let mut buffer = Buffer::empty(area);
+            self.inner.render_buffer(area, &mut buffer)?;
+            self.inner.clear_dirty();
+            self.cache = Some(buffer);
+            self.cached_area = Some(area);
+            self.stats.cache_misses += 1;
+        } else {
+            self.stats.cache_hits += 1;
+        }
         if let Some(cache) = &self.cache {
             blit(cache, target);
-            self.stats.replays += 1;
         }
-        Ok(())
-    }
-
-    fn ensure_cache(&mut self, area: Rect) -> anyhow::Result<()> {
-        let area_changed = self.cached_area != Some(area);
-        if self.cache.is_some() && !area_changed && self.inner.dirty().is_clean() {
-            return Ok(());
-        }
-
-        let mut buffer = Buffer::empty(area);
-        self.inner.render_buffer(area, &mut buffer)?;
-        self.inner.clear_dirty();
-        self.cache = Some(buffer);
-        self.cached_area = Some(area);
-        self.stats.renders += 1;
         Ok(())
     }
 }
@@ -374,10 +368,6 @@ where
 
     fn children(&self) -> ComponentChildren<'_> {
         self.inner.children()
-    }
-
-    fn subscriptions(&self) -> ComponentSubscriptions<'_> {
-        self.inner.subscriptions()
     }
 }
 
@@ -442,7 +432,6 @@ mod tests {
         id: ComponentId,
         dirty: DirtyState,
         renders: usize,
-        subscriptions: Vec<SubscriptionRequest>,
     }
 
     impl CountingBufferComponent {
@@ -451,13 +440,7 @@ mod tests {
                 id: ComponentId::new("counter"),
                 dirty: DirtyState::paint(DirtyReason::Explicit),
                 renders: 0,
-                subscriptions: Vec::new(),
             }
-        }
-
-        fn with_subscription(mut self, request: SubscriptionRequest) -> Self {
-            self.subscriptions.push(request);
-            self
         }
     }
 
@@ -493,10 +476,6 @@ mod tests {
         fn clear_dirty(&mut self) {
             self.dirty.clear();
         }
-
-        fn subscriptions(&self) -> ComponentSubscriptions<'_> {
-            &self.subscriptions
-        }
     }
 
     #[test]
@@ -510,8 +489,8 @@ mod tests {
         cached.render_to_buffer(area, &mut second)?;
 
         assert_eq!(cached.inner().renders, 1);
-        assert_eq!(cached.stats().renders, 1);
-        assert_eq!(cached.stats().replays, 2);
+        assert_eq!(cached.stats().cache_misses, 1);
+        assert_eq!(cached.stats().cache_hits, 1);
         assert_eq!(first.cell((0, 0)), second.cell((0, 0)));
         Ok(())
     }
@@ -529,19 +508,9 @@ mod tests {
         cached.render_to_buffer(larger, &mut target)?;
 
         assert_eq!(cached.inner().renders, 3);
-        assert_eq!(cached.stats().renders, 3);
+        assert_eq!(cached.stats().cache_misses, 3);
+        assert_eq!(cached.stats().cache_hits, 0);
         assert_eq!(cached.cached_area(), Some(larger));
         Ok(())
-    }
-
-    #[test]
-    fn cached_component_forwards_inert_subscription_declarations() {
-        let request = SubscriptionRequest::new(
-            crate::subscription::SubscriptionId::new("visible-files").unwrap(),
-            crate::subscription::SourceId::new("workspace").unwrap(),
-        );
-        let cached = Cached::new(CountingBufferComponent::new().with_subscription(request.clone()));
-
-        assert_eq!(cached.subscriptions(), &[request]);
     }
 }
