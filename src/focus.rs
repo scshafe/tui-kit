@@ -184,6 +184,13 @@ impl FocusManager {
             .unwrap_or(FocusScopeKind::Normal)
     }
 
+    /// Identifier of the active scope. Returns `None` only when the manager
+    /// has no scopes (impossible after `new` succeeds — the root scope is
+    /// always present).
+    pub fn active_scope_id(&self) -> Option<&FocusId> {
+        self.scopes.last().map(|scope| &scope.id)
+    }
+
     pub fn push_scope(
         &mut self,
         id: impl Into<FocusId>,
