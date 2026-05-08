@@ -39,7 +39,7 @@ pub use crate::subscription::{
     SourceId, SubscriptionHandle, SubscriptionId, SubscriptionRegistry, SubscriptionReport,
     SubscriptionRequest, UpdateEvent,
 };
-pub use crate::terminal::{Terminal, TerminalConfig};
+pub use crate::terminal::{Terminal, TerminalConfig, TerminalFeatures};
 pub use crate::testkit::{
     render_stateful_widget, render_widget, test_area, test_cell_pixels, DeterministicScheduler,
     EventScript, MockImageCall, MockImageSurface,
