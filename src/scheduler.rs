@@ -66,16 +66,25 @@ pub struct Progress {
     pub total: usize,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct SchedulerStats {
     pub pending: usize,
+    pub worker_count: usize,
     pub active_workers: usize,
+    pub worker_utilization: f32,
     pub queued: usize,
     pub completed_total: usize,
     pub failed_total: usize,
     pub cancelled_total: usize,
     pub oldest_queued_age: Option<Duration>,
     pub newest_queued_age: Option<Duration>,
+    pub oldest_active_duration: Option<Duration>,
+    pub newest_active_duration: Option<Duration>,
+    pub timing_sample_count: usize,
+    pub total_queue_wait: Duration,
+    pub total_runtime: Duration,
+    pub average_queue_wait: Option<Duration>,
+    pub average_runtime: Option<Duration>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -123,18 +132,27 @@ type WorkExecutor<Item, Out> = Box<dyn Fn(&Item) -> Result<Out> + Send + Sync>;
 struct SchedulerState<Item, Out, P> {
     queue: BinaryHeap<PrioritizedRequest<Item, P>>,
     queued: HashSet<u64>,
-    in_flight: HashMap<u64, RequestScope>,
+    in_flight: HashMap<u64, InFlightRequest>,
     completed: HashSet<u64>,
     failed: HashSet<u64>,
     completed_total: usize,
     failed_total: usize,
     cancelled_ids: HashSet<u64>,
     cancelled_total: usize,
+    timing_sample_count: usize,
+    total_queue_wait: Duration,
+    total_runtime: Duration,
     completions: VecDeque<Completion<Out>>,
     epoch: u64,
     epoch_namespaces: HashMap<String, u64>,
     seq: u64,
     shutdown: bool,
+}
+
+struct InFlightRequest {
+    scope: RequestScope,
+    queued_at: Instant,
+    started_at: Instant,
 }
 
 struct PrioritizedRequest<Item, P> {
@@ -186,6 +204,9 @@ impl<Item: Send + 'static, Out: Send + 'static, P: Ord + Clone + Send + 'static>
                 failed_total: 0,
                 cancelled_ids: HashSet::new(),
                 cancelled_total: 0,
+                timing_sample_count: 0,
+                total_queue_wait: Duration::ZERO,
+                total_runtime: Duration::ZERO,
                 completions: VecDeque::new(),
                 epoch: 0,
                 epoch_namespaces: HashMap::new(),
@@ -288,8 +309,8 @@ impl<Item: Send + 'static, Out: Send + 'static, P: Ord + Clone + Send + 'static>
         let ids: Vec<_> = state
             .in_flight
             .iter()
-            .filter_map(|(id, scope)| {
-                (scope.epoch_namespace.as_deref() == Some(namespace)).then_some(*id)
+            .filter_map(|(id, request)| {
+                (request.scope.epoch_namespace.as_deref() == Some(namespace)).then_some(*id)
             })
             .collect();
         let newly_cancelled = ids
@@ -309,7 +330,7 @@ impl<Item: Send + 'static, Out: Send + 'static, P: Ord + Clone + Send + 'static>
         let ids: Vec<_> = state
             .in_flight
             .iter()
-            .filter_map(|(id, scope)| matches(scope).then_some(*id))
+            .filter_map(|(id, request)| matches(&request.scope).then_some(*id))
             .collect();
         let newly_cancelled = ids
             .into_iter()
@@ -341,35 +362,69 @@ impl<Item: Send + 'static, Out: Send + 'static, P: Ord + Clone + Send + 'static>
     pub fn stats(&self) -> SchedulerStats {
         let state = self.inner.state.lock().unwrap();
         let now = Instant::now();
-        let mut ages = state
-            .queue
-            .iter()
-            .map(|req| now.saturating_duration_since(req.queued_at));
-        let first = ages.next();
-        let (oldest_queued_age, newest_queued_age) = first.map_or((None, None), |first| {
-            let mut oldest = first;
-            let mut newest = first;
-            for age in ages {
-                oldest = oldest.max(age);
-                newest = newest.min(age);
-            }
-            (Some(oldest), Some(newest))
-        });
+        let (oldest_queued_age, newest_queued_age) = duration_bounds(
+            state
+                .queue
+                .iter()
+                .map(|req| now.saturating_duration_since(req.queued_at)),
+        );
+        let (oldest_active_duration, newest_active_duration) = duration_bounds(
+            state
+                .in_flight
+                .values()
+                .map(|req| now.saturating_duration_since(req.started_at)),
+        );
+        let timing_sample_count = state.timing_sample_count;
+        let worker_count = self.handles.len();
         SchedulerStats {
             pending: state.queue.len() + state.in_flight.len(),
+            worker_count,
             active_workers: state.in_flight.len(),
+            worker_utilization: if worker_count == 0 {
+                0.0
+            } else {
+                state.in_flight.len() as f32 / worker_count as f32
+            },
             queued: state.queue.len(),
             completed_total: state.completed_total,
             failed_total: state.failed_total,
             cancelled_total: state.cancelled_total,
             oldest_queued_age,
             newest_queued_age,
+            oldest_active_duration,
+            newest_active_duration,
+            timing_sample_count,
+            total_queue_wait: state.total_queue_wait,
+            total_runtime: state.total_runtime,
+            average_queue_wait: average_duration(state.total_queue_wait, timing_sample_count),
+            average_runtime: average_duration(state.total_runtime, timing_sample_count),
         }
     }
 
     pub fn is_completed(&self, id: u64) -> bool {
         self.inner.state.lock().unwrap().completed.contains(&id)
     }
+}
+
+fn average_duration(total: Duration, count: usize) -> Option<Duration> {
+    let count = u32::try_from(count).ok()?;
+    (count > 0).then(|| total / count)
+}
+
+fn duration_bounds(
+    durations: impl IntoIterator<Item = Duration>,
+) -> (Option<Duration>, Option<Duration>) {
+    let mut durations = durations.into_iter();
+    let Some(first) = durations.next() else {
+        return (None, None);
+    };
+    let mut oldest = first;
+    let mut newest = first;
+    for duration in durations {
+        oldest = oldest.max(duration);
+        newest = newest.min(duration);
+    }
+    (Some(oldest), Some(newest))
 }
 
 fn cancel_queued_where<Item, Out, P: Ord>(
@@ -417,16 +472,31 @@ fn worker_loop<Item: Send + 'static, Out: Send + 'static, P: Ord + Clone + Send 
                 }
                 if let Some(req) = state.queue.pop() {
                     state.queued.remove(&req.id);
-                    state.in_flight.insert(req.id, req.scope.clone());
+                    let started_at = Instant::now();
+                    state.in_flight.insert(
+                        req.id,
+                        InFlightRequest {
+                            scope: req.scope.clone(),
+                            queued_at: req.queued_at,
+                            started_at,
+                        },
+                    );
                     break req;
                 }
                 state = inner.cv.wait(state).unwrap();
             }
         };
         let result = (inner.executor)(&request.item);
+        let finished_at = Instant::now();
         {
             let mut state = inner.state.lock().unwrap();
-            state.in_flight.remove(&request.id);
+            if let Some(in_flight) = state.in_flight.remove(&request.id) {
+                state.timing_sample_count += 1;
+                state.total_queue_wait += in_flight
+                    .started_at
+                    .saturating_duration_since(in_flight.queued_at);
+                state.total_runtime += finished_at.saturating_duration_since(in_flight.started_at);
+            }
             let current_namespace_epoch = request
                 .scope
                 .epoch_namespace
@@ -616,5 +686,45 @@ mod tests {
         assert_eq!(completions.len(), 1);
         assert_eq!(completions[0].id, 1);
         assert_eq!(completions[0].result.as_ref().unwrap(), &42);
+    }
+
+    #[test]
+    fn stats_report_worker_utilization_and_timing_samples() {
+        let (tx, rx) = mpsc::channel();
+        let (started_tx, started_rx) = mpsc::channel();
+        let (release_tx, release_rx) = mpsc::channel();
+        let release_rx = Arc::new(Mutex::new(release_rx));
+        let mut sched: Scheduler<i32, i32> = Scheduler::new(1, tx, move |item: &i32| {
+            if *item == 1 {
+                started_tx.send(()).unwrap();
+                release_rx
+                    .lock()
+                    .unwrap()
+                    .recv_timeout(Duration::from_secs(1))
+                    .unwrap();
+            }
+            Ok(*item)
+        });
+        sched.request(1, Priority::Active, 1);
+        started_rx.recv_timeout(Duration::from_secs(1)).unwrap();
+        sched.request(2, Priority::Background, 2);
+
+        let stats = sched.stats();
+        assert_eq!(stats.worker_count, 1);
+        assert_eq!(stats.active_workers, 1);
+        assert_eq!(stats.worker_utilization, 1.0);
+        assert_eq!(stats.queued, 1);
+        assert!(stats.oldest_active_duration.is_some());
+        assert!(stats.oldest_queued_age.is_some());
+
+        release_tx.send(()).unwrap();
+        let _ = rx.recv_timeout(Duration::from_secs(1)).unwrap();
+        let _ = rx.recv_timeout(Duration::from_secs(1)).unwrap();
+
+        let stats = sched.stats();
+        assert_eq!(stats.timing_sample_count, 2);
+        assert!(stats.average_queue_wait.is_some());
+        assert!(stats.average_runtime.is_some());
+        assert!(stats.total_runtime >= stats.average_runtime.unwrap());
     }
 }
