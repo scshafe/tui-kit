@@ -41,8 +41,8 @@ pub use crate::subscription::{
 };
 pub use crate::terminal::{Terminal, TerminalConfig};
 pub use crate::testkit::{
-    render_stateful_widget, render_widget, test_area, test_cell_pixels, EventScript, MockImageCall,
-    MockImageSurface,
+    render_stateful_widget, render_widget, test_area, test_cell_pixels, DeterministicScheduler,
+    EventScript, MockImageCall, MockImageSurface,
 };
 pub use crate::theme::{ThemeConfig, ThemeRole, REQUIRED_THEME_ROLES};
 pub use crate::tick::{

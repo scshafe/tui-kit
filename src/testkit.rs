@@ -10,11 +10,16 @@ use crate::events::AppEvent;
 use crate::image::{ImageCapabilities, ImageSurface, PlaceOptions};
 use crate::input::Key;
 use crate::layout::PixelSize;
+use crate::scheduler::{Completion, Priority, RequestScope};
+use anyhow::Result as AnyhowResult;
 use anyhow::Result;
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 use ratatui::widgets::{StatefulWidget, Widget};
+use std::collections::{BinaryHeap, HashSet, VecDeque};
 use std::convert::Infallible;
+
+type TestWorkExecutor<Item, Out> = Box<dyn Fn(&Item) -> AnyhowResult<Out> + Send + Sync>;
 
 /// Render a ratatui [`Widget`] into an owned [`Buffer`] for snapshot-style tests.
 pub fn render_widget<W: Widget>(widget: W, area: Rect) -> Buffer {
@@ -170,6 +175,141 @@ pub fn test_cell_pixels(width: u32, height: u32) -> PixelSize {
     PixelSize { width, height }
 }
 
+/// Deterministic single-threaded scheduler double for tests.
+///
+/// It mirrors the production scheduler's priority/FIFO ordering and completion
+/// shape, but executes work only when [`DeterministicScheduler::run_one`] or
+/// [`DeterministicScheduler::run_all`] is called. No threads are spawned and no
+/// wakeup events are sent implicitly, which keeps app-shell tests stable.
+pub struct DeterministicScheduler<Item, Out, P: Ord + Clone = Priority> {
+    queue: BinaryHeap<TestScheduledRequest<Item, P>>,
+    queued: HashSet<u64>,
+    completed: HashSet<u64>,
+    completions: VecDeque<Completion<Out>>,
+    executor: TestWorkExecutor<Item, Out>,
+    seq: u64,
+}
+
+impl<Item, Out, P: Ord + Clone> std::fmt::Debug for DeterministicScheduler<Item, Out, P> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("DeterministicScheduler")
+            .field("queued", &self.queue.len())
+            .field("completed", &self.completed.len())
+            .field("completions", &self.completions.len())
+            .finish_non_exhaustive()
+    }
+}
+
+impl<Item, Out, P: Ord + Clone> DeterministicScheduler<Item, Out, P> {
+    pub fn new<F>(executor: F) -> Self
+    where
+        F: Fn(&Item) -> AnyhowResult<Out> + Send + Sync + 'static,
+    {
+        Self {
+            queue: BinaryHeap::new(),
+            queued: HashSet::new(),
+            completed: HashSet::new(),
+            completions: VecDeque::new(),
+            executor: Box::new(executor),
+            seq: 0,
+        }
+    }
+
+    /// Queue a request with production scheduler de-duplication semantics.
+    pub fn request(&mut self, id: u64, priority: P, item: Item) {
+        self.request_scoped(id, priority, item, RequestScope::default());
+    }
+
+    /// Queue a scoped request. The scope is retained for inspection and future
+    /// extension; this deterministic double intentionally does not own app
+    /// cancellation policy beyond explicit request IDs.
+    pub fn request_scoped(&mut self, id: u64, priority: P, item: Item, scope: RequestScope) {
+        if self.completed.contains(&id) || self.queued.contains(&id) {
+            return;
+        }
+        let seq = self.seq;
+        self.seq += 1;
+        self.queued.insert(id);
+        self.queue.push(TestScheduledRequest {
+            priority,
+            seq,
+            id,
+            scope,
+            item,
+        });
+    }
+
+    /// Remove a queued request before execution.
+    pub fn cancel_id(&mut self, id: u64) -> bool {
+        if !self.queued.remove(&id) {
+            return false;
+        }
+        self.queue = self
+            .queue
+            .drain()
+            .filter(|request| request.id != id)
+            .collect();
+        true
+    }
+
+    /// Execute the next queued request, returning its ID when work ran.
+    pub fn run_one(&mut self) -> Option<u64> {
+        let request = self.queue.pop()?;
+        self.queued.remove(&request.id);
+        let id = request.id;
+        let result = (self.executor)(&request.item);
+        self.completed.insert(id);
+        self.completions.push_back(Completion { id, result });
+        Some(id)
+    }
+
+    /// Execute all currently queued requests in deterministic priority/FIFO
+    /// order.
+    pub fn run_all(&mut self) -> Vec<u64> {
+        let mut ran = Vec::new();
+        while let Some(id) = self.run_one() {
+            ran.push(id);
+        }
+        ran
+    }
+
+    pub fn drain(&mut self) -> Vec<Completion<Out>> {
+        std::mem::take(&mut self.completions).into_iter().collect()
+    }
+
+    pub fn queued_len(&self) -> usize {
+        self.queue.len()
+    }
+}
+
+struct TestScheduledRequest<Item, P> {
+    priority: P,
+    seq: u64,
+    id: u64,
+    #[allow(dead_code)]
+    scope: RequestScope,
+    item: Item,
+}
+
+impl<Item, P: Ord> PartialEq for TestScheduledRequest<Item, P> {
+    fn eq(&self, other: &Self) -> bool {
+        self.priority == other.priority && self.seq == other.seq
+    }
+}
+impl<Item, P: Ord> Eq for TestScheduledRequest<Item, P> {}
+impl<Item, P: Ord> PartialOrd for TestScheduledRequest<Item, P> {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+impl<Item, P: Ord> Ord for TestScheduledRequest<Item, P> {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.priority
+            .cmp(&other.priority)
+            .then_with(|| other.seq.cmp(&self.seq))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -222,5 +362,36 @@ mod tests {
                 MockImageCall::DeletePlacement { placement_id: 9 }
             ]
         );
+    }
+
+    #[test]
+    fn deterministic_scheduler_runs_priority_fifo_without_threads() {
+        let mut scheduler = DeterministicScheduler::new(|item: &i32| Ok(item * 10));
+
+        scheduler.request(1, Priority::Background, 1);
+        scheduler.request(2, Priority::Active, 2);
+        scheduler.request(3, Priority::Active, 3);
+
+        assert_eq!(scheduler.run_all(), vec![2, 3, 1]);
+        let completions = scheduler.drain();
+        let ids: Vec<_> = completions.iter().map(|completion| completion.id).collect();
+        let values: Vec<_> = completions
+            .iter()
+            .map(|completion| *completion.result.as_ref().unwrap())
+            .collect();
+        assert_eq!(ids, vec![2, 3, 1]);
+        assert_eq!(values, vec![20, 30, 10]);
+    }
+
+    #[test]
+    fn deterministic_scheduler_removes_cancelled_requests() {
+        let mut scheduler = DeterministicScheduler::new(|item: &i32| Ok(*item));
+
+        scheduler.request(1, Priority::Active, 1);
+        scheduler.request(2, Priority::Background, 2);
+
+        assert!(scheduler.cancel_id(1));
+        assert_eq!(scheduler.run_all(), vec![2]);
+        assert_eq!(scheduler.drain()[0].id, 2);
     }
 }
