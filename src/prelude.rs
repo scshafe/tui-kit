@@ -1,8 +1,12 @@
-//! Common imports for tui-kit consumers.
+//! Common imports for production tui-kit consumers.
 //!
 //! ```ignore
 //! use tui_kit::prelude::*;
 //! ```
+//!
+//! Test harness helpers stay under [`crate::testkit`] instead of the prelude so
+//! application imports do not accidentally couple runtime code to test-only
+//! surfaces.
 
 pub use crate::bar::{SegmentSlot, StatusFragment};
 pub use crate::component::{
@@ -32,10 +36,6 @@ pub use crate::scheduler::{
     CancellationReport, Completion, Priority, Progress, RequestScope, Scheduler, SchedulerStats,
 };
 pub use crate::terminal::{Terminal, TerminalConfig};
-pub use crate::testkit::{
-    render_stateful_widget, render_widget, test_area, test_cell_pixels, DeterministicScheduler,
-    EventScript, MockImageCall, MockImageSurface,
-};
 pub use crate::tty::{stdin_is_terminal, stdout_is_terminal, terminal_metrics, write_stdout_all};
 pub use crate::watcher::WorkspaceWatcher;
 pub use crate::widgets::dialog::Dialog;

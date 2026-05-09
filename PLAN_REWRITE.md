@@ -82,7 +82,7 @@ Cut modules come back only when:
 - **Stability annotations** on every `pub` item at module level.
 - **Consumer gate in CI**: cargo fmt/clippy/test/doc plus c4tui `cargo check` against local tui-kit.
 - **Single-PR rule for breaking changes**.
-- **`pub use` discipline**: prelude exports only `stable` items.
+- **`pub use` discipline**: prelude exports only production consumer surface; testkit helpers are no longer re-exported from the prelude.
 - **Property-test the test harness**: `tests/parity.rs` submits same workload to `Scheduler` and `DeterministicScheduler`.
 
 ## Phase 6 — Lock and version
