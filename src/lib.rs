@@ -1,22 +1,28 @@
 //! tui-kit — opinionated middleware for terminal UI applications.
 //!
 //! Sits on top of [`ratatui`] and [`crossterm`]. Provides:
-//! - Unified [`events`] channel + producers (input, watcher, scheduler, ticks).
-//! - Optional [`component`] primitives for IDs, subscription declarations, dirty tracking, and retained-ish UI.
+//! - Unified [`events`] channel + producers (input, watcher, scheduler).
 //! - Declarative [`keymap`] registry.
 //! - Cell + pixel [`tty`] metrics.
-//! - Explicit [`image`] configuration and image lifecycle surfaces.
+//! - Image lifecycle surfaces in [`image`].
 //! - Generic placement / fit / pan / zoom math in [`layout`].
 //! - Slot-aligned, priority-truncated text bars in [`bar`].
-//! - Priority-queue [`scheduler`] for async work with explicit worker configuration.
-//! - Explicit [`subscription`] requests, IDs, and update events for data-source changes.
-//! - Top-level [`runtime`] configuration for validated subsystem policy bundles.
-//! - Named-role [`theme`] configuration with noisy validation.
+//! - Priority-queue [`scheduler`] for async work.
 //! - File [`watcher`] integration.
-//! - Composed [`widgets`] (list, table, tree, tabs, picker, dialog) and a [`terminal`] session wrapper.
+//! - Composed [`widgets`] (picker, dialog) and a [`terminal`] session wrapper.
 //!
-//! See [`prelude`] for the most common imports. See `PLAN.md` in the repo
-//! for the module-by-module map and roadmap.
+//! ## Stability
+//!
+//! All public modules have at least one in-tree consumer, either c4tui or a
+//! crate test. The consumer-gate CI job exercises c4tui against the local
+//! tui-kit on every push.
+//!
+//! Module-level docs flag specific surfaces that have not yet been
+//! pressure-tested even though their host module has — for example, [`focus`]'s
+//! traversal API is unused by c4tui (which uses the modal stack only).
+//!
+//! See [`prelude`] for the most common imports. See `PLAN_REWRITE.md` for the
+//! design discipline.
 
 #![warn(missing_debug_implementations)]
 
@@ -31,13 +37,9 @@ pub mod input_thread;
 pub mod keymap;
 pub mod layout;
 pub mod prelude;
-pub mod runtime;
 pub mod scheduler;
-pub mod subscription;
 pub mod terminal;
 pub mod testkit;
-pub mod theme;
-pub mod tick;
 pub mod tty;
 pub mod watcher;
 pub mod widgets;

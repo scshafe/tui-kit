@@ -138,7 +138,11 @@ impl<Ctx> SegmentBarBuilder<Ctx> {
     }
 }
 
-fn layout_status_line(
+/// Compose a left/right status line, dropping the lowest-priority fragment
+/// across both sides until the line fits `width`. Public so apps can share
+/// the truncation algorithm without using tui-kit's [`Segment`] trait — useful
+/// when a segment context has borrowed fields that don't fit `Segment<Ctx>`.
+pub fn layout_status_line(
     left: Vec<StatusFragment>,
     right: Vec<StatusFragment>,
     width: usize,

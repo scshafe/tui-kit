@@ -1,51 +1,44 @@
 # tui-kit
 
-Opinionated middleware for building terminal UI applications. Sits on top of [`ratatui`](https://ratatui.rs/) and [`crossterm`](https://github.com/crossterm-rs/crossterm), adds the layers most apps rebuild from scratch.
+Opinionated middleware for building terminal UI applications. Sits on top of [`ratatui`](https://ratatui.rs/) and [`crossterm`](https://github.com/crossterm-rs/crossterm), provides the layers most apps rebuild from scratch.
 
 ## Status
 
-Early. Extracted from [c4tui](https://github.com/scshafe/c4tui) as the reusable substrate. API will change.
+Early. Extracted from [c4tui](https://github.com/scshafe/c4tui) as the reusable substrate. The API floor is what c4tui consumes; the consumer-gate in CI fails the build if c4tui breaks. See `PLAN_REWRITE.md` for the design discipline.
 
 ## What's in the box
 
-| Module | Provides |
-|---|---|
-| `events` | Typed `AppEvent<UserEvent>` categories + unified channel: input, terminal, scheduler, watcher, tick, update, runtime/user events |
-| `component` | Optional component traits, stable IDs, focus node handles, inert subscription declarations, explicit dirty-state invalidation, and safe buffer caching for opt-in components |
-| `input` | `Key` enum mapped from crossterm events |
-| `input_thread` | Detached input thread that pushes `InputEvent::Key` and `TerminalEvent::Resize` into the unified channel |
-| `keymap` | `KeyMap` registry with `KeyTrigger → Command<C>` declarative bindings, last-binding-wins |
-| `tty` | `terminal_metrics()` reading both cell and pixel dimensions via TIOCGWINSZ |
-| `image` | Explicit `ImageConfig`, backend preferences, `KittyImageRegistry`, and `ImageSurface` lifecycle seams |
-| `layout` | `PixelSize`, `CellSize`, `CanvasMetrics`, `ViewTransform`, `Placement` — fit/zoom/pan math |
-| `bar` | `Segment` trait + `SegmentBar` registry — slot-aligned, priority-truncated text bars |
-| `scheduler` | Priority-queue task scheduler with explicit worker config, scoped cancellation, and machine-readable queue/timing stats |
-| `subscription` | Stable source/subscription IDs, declarative subscription requests, explicit unsubscribe bookkeeping, and typed update events for data-source changes |
-| `runtime` | Top-level `RuntimeConfig` bundle plus producer handles for validated tick/watcher startup without taking over the app loop |
-| `watcher` | named notify-based file watcher with explicit debounce config, emits `WatcherEvent::WorkspaceChanged { id }` |
-| `tick` | Named periodic tick producers with explicit validation and stop handles |
-| `widgets::list` | Policy-light scrollable list mechanics with optional selection, exposed viewport math, explicit key actions |
-| `widgets::table` | Policy-light table mechanics with stable row/column IDs, sizing policies, row selection, and vertical/horizontal viewport math |
-| `widgets::tabs` | Policy-light tab state, close/reorder request hooks, pane split sizing policies, focus metadata, and inspectable pane layout results |
-| `widgets::tree` | Policy-light hierarchical state with expand/collapse, lazy-child hooks, optional tri-state checkboxes, stable IDs, and flattened viewport math |
-| `widgets::picker` | Generic list-with-detail-and-thumbnails picker, fuzzy filter, scrollable, selection highlight |
-| `widgets::dialog` | Modal rendering plus policy-light dialog state with explicit confirm/cancel/focus actions |
-| `terminal` | `Terminal` wrapping `ratatui::Terminal<CrosstermBackend>` + image registry + explicit feature config + raw-mode lifecycle |
-| `testkit` | Deterministic widget buffer rendering, typed event scripts, deterministic scheduler execution, and mock image surface call recording for tests |
-| `theme` | Explicit named-role theme config with noisy validation for every required style role |
+| Module | Provides | Consumer |
+|---|---|---|
+| `events` | Typed `AppEvent<UserEvent>` categories + unified channel: input, terminal, scheduler, watcher, user events | c4tui |
+| `component` | `Component` / `BufferComponent` traits, `ComponentId`, dirty-state invalidation, `Cached<C>` buffer caching | c4tui (`ViewPicker`) |
+| `focus` | `FocusManager` with stack-based modal/capturing scopes; `active_scope_id()` for distinguishing modal scopes | c4tui (modal stack — traversal API unused) |
+| `input` | `Key` enum mapped from crossterm events | c4tui |
+| `input_thread` | Detached input thread that pushes `InputEvent::Key` and `TerminalEvent::Resize` into the unified channel | c4tui |
+| `keymap` | `KeyMap<C>` registry generic over command type, `KeyTrigger → C` declarative bindings, last-binding-wins | c4tui (`KeyMap<PendingCommand>`) |
+| `tty` | `terminal_metrics()` reading both cell and pixel dimensions via TIOCGWINSZ | c4tui |
+| `image` | `KittyImageRegistry` + `ImageSurface` trait — transmit-once-place-many image lifecycle | c4tui |
+| `layout` | `PixelSize`, `CellSize`, `CanvasMetrics`, `ViewTransform`, `Placement` — fit/zoom/pan math | c4tui |
+| `bar` | `StatusFragment`, `SegmentSlot`, `Segment<Ctx>` trait, `SegmentBar<Ctx>`, `layout_status_line` truncation | c4tui (data types + algorithm — `Segment<Ctx>` doesn't fit borrowed contexts; see open issue) |
+| `scheduler` | Priority-queue task scheduler with custom-priority generic, scoped cancellation, machine-readable queue/timing stats | c4tui |
+| `watcher` | notify-based file watcher with debounce, emits `WatcherEvent::WorkspaceChanged` | c4tui |
+| `widgets::picker` | Generic list-with-detail-and-thumbnails picker, fuzzy filter, scrollable, selection highlight | _no consumer — c4tui has its own ViewPicker_ |
+| `widgets::dialog` | `Dialog` widget for bordered modal text rendering; `DialogState` for confirm/cancel/focus actions | c4tui (uses `Dialog` only — `DialogState` unused) |
+| `terminal` | `Terminal` wrapping `ratatui::Terminal<CrosstermBackend>` + image registry + raw-mode lifecycle | c4tui |
+| `testkit` | Widget buffer rendering helpers, typed event scripts, mock image surface, `DeterministicScheduler` | tests/parity.rs |
 
-## Examples
+## Open consumer-driven design questions
 
-| Example | Shows |
-|---|---|
-| `examples/explicit_config_startup.rs` | Starting from a named `RuntimeConfig` preset, adding named tick/watcher producers, validating before side effects, and routing typed events plus app-defined commands through one channel |
+- `Segment<Ctx>` trait can't accept contexts with borrowed fields. c4tui's `StatusContext<'a>` falls back to a c4tui-internal trait. Resolving this likely requires a HRTB-friendly redesign or moving to owned contexts.
+- `widgets::picker` has no consumer. c4tui's picker is c4tui-specific and lives in c4tui. Likely to be deleted unless a second consumer arrives.
+- `focus::FocusTraversal` (Forward/Backward/Explicit) is unused. The traversal mechanics are not pressure-tested by any in-tree app.
 
 ## Out of scope (today)
 
 - Image surfaces other than Kitty graphics (Sixel, iTerm2)
 - Async runtimes (tokio/async-std) — uses sync threads + channels
 - Full component tree runtime orchestration
-- Plugin loading and full design-system abstractions
+- Theming, additional widgets (list/table/tree/tabs), runtime config bundles, subscription primitives, periodic tick producers — all deliberately removed pending consumer demand
 
 ## License
 

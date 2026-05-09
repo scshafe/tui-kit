@@ -1,7 +1,14 @@
 //! Explicit focus traversal and modal capture primitives.
 //!
-//! Focus remains policy-light: apps decide which events mean “move focus” or
-//! “activate”; `tui-kit` provides stable IDs, inspectable scopes, traversal
+//! **Stability:** consumed by c4tui (modal stack for picker and dialog modes).
+//! The c4tui port surfaced one missing API ([`FocusManager::active_scope_id`])
+//! which has been added; further breaking changes should be motivated by
+//! additional ports. c4tui itself uses only the modal stack semantics; the
+//! traversal API (`Forward`/`Backward`/`Explicit`) has not yet been exercised
+//! by any in-tree consumer.
+//!
+//! Focus remains policy-light: apps decide which events mean "move focus" or
+//! "activate"; `tui-kit` provides stable IDs, inspectable scopes, traversal
 //! mechanics, and noisy validation for ambiguous focus graphs.
 
 use serde::{Deserialize, Serialize};
@@ -178,6 +185,13 @@ impl FocusManager {
             .last()
             .map(|scope| scope.kind)
             .unwrap_or(FocusScopeKind::Normal)
+    }
+
+    /// Identifier of the active scope. Returns `None` only when the manager
+    /// has no scopes (impossible after `new` succeeds — the root scope is
+    /// always present).
+    pub fn active_scope_id(&self) -> Option<&FocusId> {
+        self.scopes.last().map(|scope| &scope.id)
     }
 
     pub fn push_scope(

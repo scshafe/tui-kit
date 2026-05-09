@@ -1,7 +1,7 @@
 //! Unified application event channel.
 //!
-//! All producers (input thread, file watcher, scheduler, ticker, and
-//! app-defined producers) push typed [`AppEvent`] categories into a single
+//! All producers (input thread, file watcher, scheduler, and app-defined
+//! producers) push typed [`AppEvent`] categories into a single
 //! [`AppEventSender`]; the application's main loop drains the matching
 //! [`AppEventReceiver`].
 //!
@@ -12,9 +12,6 @@
 //! top-level event enum become an unstructured junk drawer.
 
 use crate::input::Key;
-use crate::subscription::UpdateEvent;
-use crate::tick::TickSourceId;
-use crate::watcher::WatcherSourceId;
 use std::convert::Infallible;
 use std::sync::mpsc::{Receiver, Sender};
 
@@ -23,11 +20,8 @@ use std::sync::mpsc::{Receiver, Sender};
 pub enum AppEvent<UserEvent = Infallible> {
     Input(InputEvent),
     Terminal(TerminalEvent),
-    Runtime(RuntimeEvent),
     Scheduler(SchedulerEvent),
     Watcher(WatcherEvent),
-    Tick(TickEvent),
-    Update(UpdateEvent),
     User(UserEvent),
 }
 
@@ -45,26 +39,14 @@ pub enum TerminalEvent {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
-pub enum RuntimeEvent {
-    Heartbeat,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[non_exhaustive]
 pub enum SchedulerEvent {
     Complete,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum WatcherEvent {
-    WorkspaceChanged { id: WatcherSourceId },
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-#[non_exhaustive]
-pub enum TickEvent {
-    Tick { id: TickSourceId },
+    WorkspaceChanged,
 }
 
 impl<UserEvent> AppEvent<UserEvent> {
@@ -80,20 +62,8 @@ impl<UserEvent> AppEvent<UserEvent> {
         Self::Scheduler(SchedulerEvent::Complete)
     }
 
-    pub fn workspace_changed(id: WatcherSourceId) -> Self {
-        Self::Watcher(WatcherEvent::WorkspaceChanged { id })
-    }
-
-    pub fn heartbeat() -> Self {
-        Self::Runtime(RuntimeEvent::Heartbeat)
-    }
-
-    pub fn tick(id: TickSourceId) -> Self {
-        Self::Tick(TickEvent::Tick { id })
-    }
-
-    pub fn update(event: UpdateEvent) -> Self {
-        Self::Update(event)
+    pub fn workspace_changed() -> Self {
+        Self::Watcher(WatcherEvent::WorkspaceChanged)
     }
 }
 
@@ -119,28 +89,8 @@ mod tests {
             AppEvent::Scheduler(SchedulerEvent::Complete)
         );
         assert_eq!(
-            AppEvent::<Infallible>::workspace_changed(WatcherSourceId::new("workspace").unwrap()),
-            AppEvent::Watcher(WatcherEvent::WorkspaceChanged {
-                id: WatcherSourceId::new("workspace").unwrap()
-            })
-        );
-        assert_eq!(
-            AppEvent::<Infallible>::heartbeat(),
-            AppEvent::Runtime(RuntimeEvent::Heartbeat)
-        );
-        assert_eq!(
-            AppEvent::<Infallible>::tick(TickSourceId::new("ui").unwrap()),
-            AppEvent::Tick(TickEvent::Tick {
-                id: TickSourceId::new("ui").unwrap()
-            })
-        );
-        assert_eq!(
-            AppEvent::<Infallible>::update(UpdateEvent::SourceChanged {
-                source: crate::subscription::SourceId::new("workspace").unwrap()
-            }),
-            AppEvent::Update(UpdateEvent::SourceChanged {
-                source: crate::subscription::SourceId::new("workspace").unwrap()
-            })
+            AppEvent::<Infallible>::workspace_changed(),
+            AppEvent::Watcher(WatcherEvent::WorkspaceChanged)
         );
     }
 

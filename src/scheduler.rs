@@ -14,10 +14,10 @@
 //! [`Scheduler::drain`] after receiving an [`crate::events::AppEvent::Scheduler`]
 //! event carrying [`crate::events::SchedulerEvent::Complete`].
 
-use crate::config::{ConfigError, Validate};
 use crate::events::{AppEvent, AppEventSender};
 use anyhow::Result as AnyhowResult;
 use std::collections::{BinaryHeap, HashMap, HashSet, VecDeque};
+use std::num::NonZeroUsize;
 use std::sync::{Arc, Condvar, Mutex};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
@@ -27,33 +27,6 @@ pub enum Priority {
     Background,
     Hover,
     Active,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct SchedulerConfig {
-    pub worker_count: usize,
-}
-
-impl SchedulerConfig {
-    pub fn explicit(worker_count: usize) -> Self {
-        Self { worker_count }
-    }
-
-    pub fn single_worker() -> Self {
-        Self { worker_count: 1 }
-    }
-}
-
-impl Validate for SchedulerConfig {
-    fn validate(&self) -> Result<(), ConfigError> {
-        if self.worker_count == 0 {
-            return Err(ConfigError::new(
-                "scheduler.worker_count",
-                "must be at least one; use a named preset such as SchedulerConfig::single_worker() or pass an explicit positive count",
-            ));
-        }
-        Ok(())
-    }
 }
 
 #[derive(Debug)]
@@ -216,24 +189,11 @@ impl<Item, P: Ord> Ord for PrioritizedRequest<Item, P> {
 impl<Item: Send + 'static, Out: Send + 'static, P: Ord + Clone + Send + 'static>
     Scheduler<Item, Out, P>
 {
-    pub fn new<F>(workers: usize, sink: AppEventSender, executor: F) -> Self
+    pub fn new<F>(workers: NonZeroUsize, sink: AppEventSender, executor: F) -> Self
     where
         F: Fn(&Item) -> AnyhowResult<Out> + Send + Sync + 'static,
     {
-        Self::try_new(SchedulerConfig::explicit(workers), sink, executor)
-            .expect("invalid scheduler config")
-    }
-
-    pub fn try_new<F>(
-        config: SchedulerConfig,
-        sink: AppEventSender,
-        executor: F,
-    ) -> Result<Self, ConfigError>
-    where
-        F: Fn(&Item) -> AnyhowResult<Out> + Send + Sync + 'static,
-    {
-        config.validate()?;
-        let workers = config.worker_count;
+        let workers = workers.get();
         let inner = Arc::new(SchedulerInner {
             state: Mutex::new(SchedulerState {
                 queue: BinaryHeap::new(),
@@ -263,11 +223,11 @@ impl<Item: Send + 'static, Out: Send + 'static, P: Ord + Clone + Send + 'static>
             let inner_t = inner.clone();
             handles.push(thread::spawn(move || worker_loop(inner_t)));
         }
-        Ok(Self {
+        Self {
             inner,
             handles,
             last_known_total: 0,
-        })
+        }
     }
 
     pub fn request(&mut self, id: u64, priority: P, item: Item) {
@@ -633,10 +593,7 @@ mod tests {
     fn scheduler_accepts_custom_priority_type() {
         let (tx, rx) = mpsc::channel();
         let mut sched: Scheduler<i32, i32, CustomPriority> =
-            Scheduler::try_new(SchedulerConfig::single_worker(), tx, |item: &i32| {
-                Ok(item * 2)
-            })
-            .unwrap();
+            Scheduler::new(NonZeroUsize::new(1).unwrap(), tx, |item: &i32| Ok(item * 2));
 
         sched.request(1, CustomPriority::Blocking, 21);
         let _ = rx.recv_timeout(Duration::from_secs(1)).unwrap();
@@ -647,40 +604,23 @@ mod tests {
     }
 
     #[test]
-    fn scheduler_config_rejects_zero_workers() {
-        let (tx, _rx) = mpsc::channel();
-        let err = Scheduler::<i32, i32>::try_new(SchedulerConfig::explicit(0), tx, |item: &i32| {
-            Ok(*item)
-        })
-        .unwrap_err();
-
-        assert_eq!(err.path, "scheduler.worker_count");
-    }
-
-    #[test]
-    #[should_panic(expected = "invalid scheduler config")]
-    fn legacy_new_panics_on_zero_workers_instead_of_silently_clamping() {
-        let (tx, _rx) = mpsc::channel();
-        let _sched: Scheduler<i32, i32> = Scheduler::new(0, tx, |item: &i32| Ok(*item));
-    }
-
-    #[test]
     fn cancel_group_removes_queued_work_and_updates_stats() {
         let (tx, _rx) = mpsc::channel();
         let (started_tx, started_rx) = mpsc::channel();
         let (release_tx, release_rx) = mpsc::channel();
         let release_rx = Arc::new(Mutex::new(release_rx));
-        let mut sched: Scheduler<i32, i32> = Scheduler::new(1, tx, move |item: &i32| {
-            if *item == 0 {
-                started_tx.send(()).unwrap();
-                release_rx
-                    .lock()
-                    .unwrap()
-                    .recv_timeout(Duration::from_secs(1))
-                    .unwrap();
-            }
-            Ok(item * 2)
-        });
+        let mut sched: Scheduler<i32, i32> =
+            Scheduler::new(NonZeroUsize::new(1).unwrap(), tx, move |item: &i32| {
+                if *item == 0 {
+                    started_tx.send(()).unwrap();
+                    release_rx
+                        .lock()
+                        .unwrap()
+                        .recv_timeout(Duration::from_secs(1))
+                        .unwrap();
+                }
+                Ok(item * 2)
+            });
         sched.request(0, Priority::Active, 0);
         started_rx.recv_timeout(Duration::from_secs(1)).unwrap();
         sched.request_scoped(
@@ -711,15 +651,16 @@ mod tests {
         let (started_tx, started_rx) = mpsc::channel();
         let (release_tx, release_rx) = mpsc::channel();
         let release_rx = Arc::new(Mutex::new(release_rx));
-        let mut sched: Scheduler<i32, i32> = Scheduler::new(1, tx, move |item: &i32| {
-            started_tx.send(()).unwrap();
-            release_rx
-                .lock()
-                .unwrap()
-                .recv_timeout(Duration::from_secs(1))
-                .unwrap();
-            Ok(*item)
-        });
+        let mut sched: Scheduler<i32, i32> =
+            Scheduler::new(NonZeroUsize::new(1).unwrap(), tx, move |item: &i32| {
+                started_tx.send(()).unwrap();
+                release_rx
+                    .lock()
+                    .unwrap()
+                    .recv_timeout(Duration::from_secs(1))
+                    .unwrap();
+                Ok(*item)
+            });
         sched.request_scoped(
             1,
             Priority::Active,
@@ -740,7 +681,8 @@ mod tests {
     #[test]
     fn scheduler_executes_and_returns_completions() {
         let (tx, rx) = mpsc::channel();
-        let mut sched: Scheduler<i32, i32> = Scheduler::new(1, tx, |item: &i32| Ok(item * 2));
+        let mut sched: Scheduler<i32, i32> =
+            Scheduler::new(NonZeroUsize::new(1).unwrap(), tx, |item: &i32| Ok(item * 2));
         sched.request(1, Priority::Active, 21);
         // wait for completion event
         let _ = rx.recv_timeout(Duration::from_secs(1)).unwrap();
@@ -756,17 +698,18 @@ mod tests {
         let (started_tx, started_rx) = mpsc::channel();
         let (release_tx, release_rx) = mpsc::channel();
         let release_rx = Arc::new(Mutex::new(release_rx));
-        let mut sched: Scheduler<i32, i32> = Scheduler::new(1, tx, move |item: &i32| {
-            if *item == 1 {
-                started_tx.send(()).unwrap();
-                release_rx
-                    .lock()
-                    .unwrap()
-                    .recv_timeout(Duration::from_secs(1))
-                    .unwrap();
-            }
-            Ok(*item)
-        });
+        let mut sched: Scheduler<i32, i32> =
+            Scheduler::new(NonZeroUsize::new(1).unwrap(), tx, move |item: &i32| {
+                if *item == 1 {
+                    started_tx.send(()).unwrap();
+                    release_rx
+                        .lock()
+                        .unwrap()
+                        .recv_timeout(Duration::from_secs(1))
+                        .unwrap();
+                }
+                Ok(*item)
+            });
         sched.request(1, Priority::Active, 1);
         started_rx.recv_timeout(Duration::from_secs(1)).unwrap();
         sched.request(2, Priority::Background, 2);

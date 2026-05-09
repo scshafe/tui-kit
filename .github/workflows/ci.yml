@@ -1,0 +1,62 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  tui-kit:
+    name: tui-kit (fmt + clippy + test + doc)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: tui-kit
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: tui-kit
+      - run: cargo fmt --check
+        working-directory: tui-kit
+      - run: cargo clippy --all-targets -- -D warnings
+        working-directory: tui-kit
+      - run: cargo test
+        working-directory: tui-kit
+      - run: cargo doc --no-deps
+        working-directory: tui-kit
+
+  c4tui-consumer-gate:
+    name: c4tui consumer gate
+    runs-on: ubuntu-latest
+    needs: tui-kit
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: tui-kit
+      - uses: actions/checkout@v4
+        with:
+          repository: scshafe/c4tui
+          ref: ${{ github.ref_name == 'main' && 'main' || 'migrate-to-demolished-tui-kit' }}
+          path: c4tui
+          # When tui-kit's main has the new API and c4tui's main has been
+          # migrated, drop the ref override above and let this default to main.
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: c4tui
+      - name: Patch c4tui to use local tui-kit
+        run: |
+          cat >> c4tui/Cargo.toml <<'EOF'
+
+          [patch.crates-io]
+          tui-kit = { path = "../tui-kit" }
+          EOF
+          # If c4tui depends on tui-kit by path already, the patch is a no-op.
+      - name: c4tui cargo check
+        run: cargo check --all-targets
+        working-directory: c4tui
+      - name: c4tui cargo test
+        run: cargo test
+        working-directory: c4tui
