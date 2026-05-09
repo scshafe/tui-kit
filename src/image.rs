@@ -18,6 +18,11 @@
 //!    Use on workspace reload, not picker-close.
 //! 5. `shutdown()` — emits a global "delete all everything" escape.
 //!    Drop-time cleanup only.
+//!
+//! **Stability:** consumed by c4tui through `Terminal` and image placement
+//! paths. Kitty and explicit no-op surfaces are the earned API today; additional
+//! protocols should land with a terminal consumer or integration test that uses
+//! the same lifecycle.
 
 use crate::config::{ConfigError, Validate};
 use crate::layout::{PixelRect, PixelSize};

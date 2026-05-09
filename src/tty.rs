@@ -3,6 +3,10 @@
 //! [`terminal_metrics`] uses TIOCGWINSZ to read both cell dimensions and
 //! pixel dimensions. The pixel dimensions matter for image-based UIs that
 //! need to compute "fit" math against actual rendered pixels.
+//!
+//! **Stability:** consumed by c4tui and by terminal setup. This module should
+//! stay at the probing/raw-stdout boundary; higher-level terminal policy belongs
+//! in [`crate::terminal`].
 
 use crate::layout::{CanvasMetrics, CellPixel, CellSize};
 use std::io::{self, IsTerminal, Write};

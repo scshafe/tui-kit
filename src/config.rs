@@ -3,6 +3,11 @@
 //! Runtime-facing configuration should be explicit and validated before use.
 //! Subsystems implement [`Validate`] to report machine-readable field paths
 //! and clear reasons instead of silently accepting ambiguous policy.
+//!
+//! **Stability:** shared by validated public configs that survived the
+//! feedback-loop correction, currently terminal/image/focus/placement policy.
+//! New config wrappers should not be added unless a consumer needs the bundle;
+//! prefer direct subsystem validation with non-doubled paths.
 
 use std::error::Error;
 use std::fmt;

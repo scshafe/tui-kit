@@ -4,6 +4,10 @@
 //! `C` is typically an enum the application defines for its own commands.
 //! Last binding wins, so user overrides applied after `defaults()` take
 //! precedence.
+//!
+//! **Stability:** consumed by c4tui via `KeyMap<PendingCommand>`. tui-kit owns
+//! trigger-to-command lookup mechanics only; default bindings and command
+//! semantics stay in applications.
 
 use crate::input::Key;
 

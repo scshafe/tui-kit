@@ -4,6 +4,10 @@
 //! [`read_key`] blocks on the next crossterm event and translates it.
 //! Designed to be called from the dedicated input thread spawned by
 //! [`crate::input_thread::spawn`].
+//!
+//! **Stability:** consumed by c4tui key handling and by tui-kit's input
+//! producer. Keep this module as a thin translation layer; app command meaning
+//! belongs in keymaps and application dispatch.
 
 use anyhow::Result;
 use crossterm::event::{

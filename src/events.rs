@@ -10,6 +10,11 @@
 //! scheduler buffers completion data internally; the app drains it via the
 //! scheduler's own API. This keeps event delivery unified without letting the
 //! top-level event enum become an unstructured junk drawer.
+//!
+//! **Stability:** consumed by c4tui's main loop and producer tests. The
+//! categorized `AppEvent<UserEvent>` shape is kept because the c4tui migration
+//! validated it; new event categories should arrive with a producer and a real
+//! consumer in the same change set.
 
 use crate::input::Key;
 use std::convert::Infallible;

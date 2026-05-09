@@ -3,6 +3,10 @@
 //! [`WorkspaceWatcher::spawn`] takes a list of paths and a debounce duration.
 //! Relevant filesystem events (Create/Modify/Remove) coalesce into a single
 //! [`AppEvent::Watcher`] carrying [`crate::events::WatcherEvent::WorkspaceChanged`].
+//!
+//! **Stability:** consumed by c4tui's workspace reload path. Named watcher
+//! routing was removed because c4tui did not need it; reintroduce source IDs
+//! only with a consumer that handles multiple watcher sources.
 
 use crate::events::{AppEvent, AppEventSender};
 use anyhow::{Context, Result};

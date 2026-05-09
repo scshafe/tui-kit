@@ -5,6 +5,11 @@
 //! stored generic segment registry would force the wrong lifetime shape. Apps
 //! own their segment traits and can share [`StatusFragment`], [`SegmentSlot`],
 //! and [`layout_status_line`] for deterministic composition.
+//!
+//! **Stability:** consumed by c4tui's status bar. Public scope is deliberately
+//! limited to the fragment/slot data and layout algorithm c4tui shares; the
+//! removed segment registry should re-enter only with a consumer whose context
+//! shape actually fits storage in tui-kit.
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SegmentSlot {

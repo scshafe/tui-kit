@@ -13,6 +13,11 @@
 //! Completions are buffered internally; the application drains them with
 //! [`Scheduler::drain`] after receiving an [`crate::events::AppEvent::Scheduler`]
 //! event carrying [`crate::events::SchedulerEvent::Complete`].
+//!
+//! **Stability:** consumed by c4tui's render pool and by parity tests against
+//! [`crate::testkit::DeterministicScheduler`]. Cancellation and completion
+//! semantics are contract surface; keep the real scheduler and deterministic
+//! test double aligned before expanding either one.
 
 use crate::events::{AppEvent, AppEventSender};
 use anyhow::Result as AnyhowResult;

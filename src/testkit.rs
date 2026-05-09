@@ -5,6 +5,10 @@
 //! route typed input/resize events through the same [`crate::events::AppEvent`]
 //! shape used at runtime, and assert image lifecycle calls without emitting
 //! terminal escape sequences.
+//!
+//! **Stability:** consumed by tui-kit's parity tests and available to app
+//! tests, but intentionally not re-exported from the production prelude. Test
+//! doubles must preserve production semantics before they grow convenience API.
 
 use crate::events::AppEvent;
 use crate::image::{ImageCapabilities, ImageSurface, PlaceOptions};

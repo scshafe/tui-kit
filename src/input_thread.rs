@@ -1,6 +1,10 @@
 //! Detached thread that drains crossterm events into the unified
 //! [`AppEventSender`] channel. Spawn after [`crate::terminal::Terminal::enter`]
 //! has put the terminal into raw mode.
+//!
+//! **Stability:** consumed by c4tui as the production input producer. This
+//! module should stay policy-light: it translates terminal input into events,
+//! but does not interpret commands or own the app loop.
 
 use crate::events::{AppEvent, AppEventSender};
 use crate::input::{read_key, Key};

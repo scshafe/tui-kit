@@ -15,6 +15,10 @@
 //! Drop restores the user's terminal: leaves alt-screen, disables mouse
 //! capture, restores cursor visibility, exits raw mode, and emits a
 //! selected image backend cleanup so no image placements leak.
+//!
+//! **Stability:** consumed by c4tui's terminal session wrapper. tui-kit owns
+//! raw-mode/alt-screen/image-registry mechanics; app-specific chrome,
+//! lifecycle policy, and workspace state remain outside this module.
 
 use crate::config::{ConfigError, Validate};
 use crate::image::{ImageBackendPreference, ImageSurfaceRegistry};
