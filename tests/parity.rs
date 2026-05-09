@@ -217,6 +217,68 @@ fn cancel_queued_on_real_scheduler(
 }
 
 #[test]
+fn in_flight_cancellation_report_and_completion_drop_match() {
+    let mut det: DeterministicScheduler<i32, i32> = DeterministicScheduler::new(|item| Ok(*item));
+    det.request_scoped(
+        7,
+        Priority::Active,
+        7,
+        RequestScope::default().group("stale"),
+    );
+    assert_eq!(det.begin_one(), Some(7));
+    let report = det.cancel_group("stale");
+    assert_eq!(report.queued, 0);
+    assert_eq!(report.in_flight, 1);
+    assert_eq!(det.finish_in_flight(), None);
+    assert!(det.drain().is_empty());
+
+    let real = cancel_in_flight_on_real_scheduler(|sched| sched.cancel_group("stale"));
+    assert_eq!(real.report, report);
+    assert!(real.completions.is_empty());
+}
+
+struct InFlightCancelOutcome {
+    report: CancellationReport,
+    completions: Vec<u64>,
+}
+
+fn cancel_in_flight_on_real_scheduler(
+    cancel: impl FnOnce(&mut Scheduler<i32, i32>) -> CancellationReport,
+) -> InFlightCancelOutcome {
+    let (tx, rx) = mpsc::channel();
+    let (started_tx, started_rx) = mpsc::channel();
+    let (release_tx, release_rx) = mpsc::channel();
+    let release_rx = Arc::new(Mutex::new(release_rx));
+    let mut sched: Scheduler<i32, i32> =
+        Scheduler::new(NonZeroUsize::new(1).unwrap(), tx, move |item: &i32| {
+            started_tx.send(()).unwrap();
+            release_rx
+                .lock()
+                .unwrap()
+                .recv_timeout(Duration::from_secs(2))
+                .unwrap();
+            Ok(*item)
+        });
+
+    sched.request_scoped(
+        7,
+        Priority::Active,
+        7,
+        RequestScope::default().group("stale"),
+    );
+    started_rx.recv_timeout(Duration::from_secs(2)).unwrap();
+    let report = cancel(&mut sched);
+    release_tx.send(()).unwrap();
+    rx.recv_timeout(Duration::from_secs(2)).unwrap();
+    let completions = sched.drain().into_iter().map(|c| c.id).collect();
+
+    InFlightCancelOutcome {
+        report,
+        completions,
+    }
+}
+
+#[test]
 fn invalidate_all_drops_pending_work_in_both() {
     let mut det: DeterministicScheduler<i32, i32> = DeterministicScheduler::new(|item| Ok(*item));
     det.request(1, Priority::Active, 1);

@@ -187,6 +187,7 @@ pub fn test_cell_pixels(width: u32, height: u32) -> PixelSize {
 pub struct DeterministicScheduler<Item, Out, P: Ord + Clone = Priority> {
     queue: BinaryHeap<TestScheduledRequest<Item, P>>,
     queued: HashSet<u64>,
+    in_flight: Option<TestScheduledRequest<Item, P>>,
     completed: HashSet<u64>,
     cancelled_ids: HashSet<u64>,
     cancelled_total: usize,
@@ -203,6 +204,7 @@ impl<Item, Out, P: Ord + Clone> std::fmt::Debug for DeterministicScheduler<Item,
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("DeterministicScheduler")
             .field("queued", &self.queue.len())
+            .field("in_flight", &self.in_flight.is_some())
             .field("completed", &self.completed.len())
             .field("completions", &self.completions.len())
             .field("cancelled_total", &self.cancelled_total)
@@ -218,6 +220,7 @@ impl<Item, Out, P: Ord + Clone> DeterministicScheduler<Item, Out, P> {
         Self {
             queue: BinaryHeap::new(),
             queued: HashSet::new(),
+            in_flight: None,
             completed: HashSet::new(),
             cancelled_ids: HashSet::new(),
             cancelled_total: 0,
@@ -234,7 +237,10 @@ impl<Item, Out, P: Ord + Clone> DeterministicScheduler<Item, Out, P> {
     }
 
     pub fn request_scoped(&mut self, id: u64, priority: P, item: Item, scope: RequestScope) {
-        if self.completed.contains(&id) || self.queued.contains(&id) {
+        if self.completed.contains(&id)
+            || self.queued.contains(&id)
+            || self.in_flight.as_ref().is_some_and(|req| req.id == id)
+        {
             return;
         }
         let namespace_epoch = scope
@@ -258,33 +264,27 @@ impl<Item, Out, P: Ord + Clone> DeterministicScheduler<Item, Out, P> {
 
     pub fn cancel_id(&mut self, id: u64) -> CancellationReport {
         let queued = cancel_queued_where(&mut self.queue, &mut self.queued, |req| req.id == id);
-        self.cancelled_total += queued;
-        CancellationReport {
-            queued,
-            in_flight: 0,
-        }
+        let in_flight = self.cancel_in_flight(|req| req.id == id);
+        self.cancelled_total += queued + in_flight;
+        CancellationReport { queued, in_flight }
     }
 
     pub fn cancel_group(&mut self, group: &str) -> CancellationReport {
         let queued = cancel_queued_where(&mut self.queue, &mut self.queued, |req| {
             req.scope.group.as_deref() == Some(group)
         });
-        self.cancelled_total += queued;
-        CancellationReport {
-            queued,
-            in_flight: 0,
-        }
+        let in_flight = self.cancel_in_flight(|req| req.scope.group.as_deref() == Some(group));
+        self.cancelled_total += queued + in_flight;
+        CancellationReport { queued, in_flight }
     }
 
     pub fn cancel_source(&mut self, source: &str) -> CancellationReport {
         let queued = cancel_queued_where(&mut self.queue, &mut self.queued, |req| {
             req.scope.source.as_deref() == Some(source)
         });
-        self.cancelled_total += queued;
-        CancellationReport {
-            queued,
-            in_flight: 0,
-        }
+        let in_flight = self.cancel_in_flight(|req| req.scope.source.as_deref() == Some(source));
+        self.cancelled_total += queued + in_flight;
+        CancellationReport { queued, in_flight }
     }
 
     pub fn invalidate_epoch_namespace(&mut self, namespace: &str) -> CancellationReport {
@@ -295,27 +295,35 @@ impl<Item, Out, P: Ord + Clone> DeterministicScheduler<Item, Out, P> {
         let queued = cancel_queued_where(&mut self.queue, &mut self.queued, |req| {
             req.scope.epoch_namespace.as_deref() == Some(namespace)
         });
-        self.cancelled_total += queued;
-        CancellationReport {
-            queued,
-            in_flight: 0,
-        }
+        let in_flight =
+            self.cancel_in_flight(|req| req.scope.epoch_namespace.as_deref() == Some(namespace));
+        self.cancelled_total += queued + in_flight;
+        CancellationReport { queued, in_flight }
     }
 
     pub fn invalidate_all(&mut self) {
         let queued = self.queue.len();
+        let in_flight = self
+            .in_flight
+            .as_ref()
+            .is_some_and(|req| self.cancelled_ids.insert(req.id));
         self.epoch += 1;
         self.queue.clear();
         self.queued.clear();
         self.completed.clear();
         self.completions.clear();
-        self.cancelled_total += queued;
+        self.cancelled_total += queued + usize::from(in_flight);
     }
 
-    /// Execute the next queued request whose epoch is still current.
-    /// Returns the executed id, or None if the queue is empty (cancelled
-    /// requests are silently dropped).
-    pub fn run_one(&mut self) -> Option<u64> {
+    /// Start the next queued request whose epoch is still current, leaving it
+    /// in flight until [`DeterministicScheduler::finish_in_flight`] is called.
+    ///
+    /// This exposes the same cancellation window production workers have after
+    /// dequeuing work and before publishing a completion.
+    pub fn begin_one(&mut self) -> Option<u64> {
+        if self.in_flight.is_some() {
+            return None;
+        }
         while let Some(request) = self.queue.pop() {
             self.queued.remove(&request.id);
             if request.epoch != self.epoch {
@@ -330,16 +338,58 @@ impl<Item, Out, P: Ord + Clone> DeterministicScheduler<Item, Out, P> {
             if request.namespace_epoch != current_namespace_epoch {
                 continue;
             }
-            if self.cancelled_ids.remove(&request.id) {
-                continue;
-            }
             let id = request.id;
-            let result = (self.executor)(&request.item);
-            self.completed.insert(id);
-            self.completions.push_back(Completion { id, result });
+            self.in_flight = Some(request);
             return Some(id);
         }
         None
+    }
+
+    /// Finish the currently in-flight request.
+    ///
+    /// The executor still runs for cancelled work, matching the production
+    /// scheduler's "finish then drop cancelled completion" behavior. Returns
+    /// the completed id only when a completion was recorded.
+    pub fn finish_in_flight(&mut self) -> Option<u64> {
+        let request = self.in_flight.take()?;
+        let id = request.id;
+        let result = (self.executor)(&request.item);
+        let current_namespace_epoch = request
+            .scope
+            .epoch_namespace
+            .as_ref()
+            .and_then(|ns| self.epoch_namespaces.get(ns).copied())
+            .unwrap_or(0);
+        if request.epoch == self.epoch
+            && request.namespace_epoch == current_namespace_epoch
+            && !self.cancelled_ids.remove(&id)
+        {
+            self.completed.insert(id);
+            self.completions.push_back(Completion { id, result });
+            Some(id)
+        } else {
+            None
+        }
+    }
+
+    /// Execute the next queued request whose epoch is still current.
+    /// Returns the completed id, or None if the queue is empty or the started
+    /// request was cancelled/stale before completion.
+    pub fn run_one(&mut self) -> Option<u64> {
+        self.begin_one()?;
+        self.finish_in_flight()
+    }
+
+    fn cancel_in_flight(
+        &mut self,
+        matches: impl Fn(&TestScheduledRequest<Item, P>) -> bool,
+    ) -> usize {
+        if let Some(request) = &self.in_flight {
+            if matches(request) && self.cancelled_ids.insert(request.id) {
+                return 1;
+            }
+        }
+        0
     }
 
     pub fn run_all(&mut self) -> Vec<u64> {
@@ -356,6 +406,10 @@ impl<Item, Out, P: Ord + Clone> DeterministicScheduler<Item, Out, P> {
 
     pub fn queued_len(&self) -> usize {
         self.queue.len()
+    }
+
+    pub fn in_flight_len(&self) -> usize {
+        usize::from(self.in_flight.is_some())
     }
 
     pub fn cancelled_total(&self) -> usize {
