@@ -9,10 +9,10 @@
 //! pass against the real scheduler.
 
 use std::num::NonZeroUsize;
-use std::sync::mpsc;
+use std::sync::{mpsc, Arc, Mutex};
 use std::time::Duration;
 
-use tui_kit::scheduler::{Priority, RequestScope, Scheduler};
+use tui_kit::scheduler::{CancellationReport, Priority, RequestScope, Scheduler};
 use tui_kit::testkit::DeterministicScheduler;
 
 #[test]
@@ -85,6 +85,58 @@ fn cancel_group_matches() {
     assert_eq!(report.in_flight, 0);
     assert_eq!(det.queued_len(), 1);
 
+    let real = cancel_queued_on_real_scheduler(|sched| sched.cancel_group("stale"));
+    assert_eq!(real.queued, report.queued);
+    assert_eq!(real.in_flight, report.in_flight);
+
+    det.run_all();
+    let completed: Vec<u64> = det.drain().into_iter().map(|c| c.id).collect();
+    assert_eq!(completed, vec![2]);
+}
+
+#[test]
+fn cancel_id_matches() {
+    let mut det: DeterministicScheduler<i32, i32> = DeterministicScheduler::new(|item| Ok(*item));
+    det.request(1, Priority::Background, 1);
+    det.request(2, Priority::Background, 2);
+
+    let report = det.cancel_id(1);
+    assert_eq!(report.queued, 1);
+    assert_eq!(report.in_flight, 0);
+
+    let real = cancel_queued_on_real_scheduler(|sched| sched.cancel_id(1));
+    assert_eq!(real.queued, report.queued);
+    assert_eq!(real.in_flight, report.in_flight);
+
+    det.run_all();
+    let completed: Vec<u64> = det.drain().into_iter().map(|c| c.id).collect();
+    assert_eq!(completed, vec![2]);
+}
+
+#[test]
+fn cancel_source_matches() {
+    let mut det: DeterministicScheduler<i32, i32> = DeterministicScheduler::new(|item| Ok(*item));
+    det.request_scoped(
+        1,
+        Priority::Background,
+        1,
+        RequestScope::default().source("stale"),
+    );
+    det.request_scoped(
+        2,
+        Priority::Background,
+        2,
+        RequestScope::default().source("fresh"),
+    );
+
+    let report = det.cancel_source("stale");
+    assert_eq!(report.queued, 1);
+    assert_eq!(report.in_flight, 0);
+
+    let real = cancel_queued_on_real_scheduler(|sched| sched.cancel_source("stale"));
+    assert_eq!(real.queued, report.queued);
+    assert_eq!(real.in_flight, report.in_flight);
+
     det.run_all();
     let completed: Vec<u64> = det.drain().into_iter().map(|c| c.id).collect();
     assert_eq!(completed, vec![2]);
@@ -99,7 +151,9 @@ fn epoch_namespace_invalidation_drops_queued_work() {
         1,
         RequestScope::default().epoch_namespace("thumbnail"),
     );
-    det.invalidate_epoch_namespace("thumbnail");
+    let report = det.invalidate_epoch_namespace("thumbnail");
+    assert_eq!(report.queued, 1);
+    assert_eq!(report.in_flight, 0);
     det.request_scoped(
         2,
         Priority::Active,
@@ -107,8 +161,59 @@ fn epoch_namespace_invalidation_drops_queued_work() {
         RequestScope::default().epoch_namespace("thumbnail"),
     );
 
+    let real =
+        cancel_queued_on_real_scheduler(|sched| sched.invalidate_epoch_namespace("thumbnail"));
+    assert_eq!(real.queued, report.queued);
+    assert_eq!(real.in_flight, report.in_flight);
+
     let ran = det.run_all();
     assert_eq!(ran, vec![2], "stale-namespace work must drop silently");
+}
+
+fn cancel_queued_on_real_scheduler(
+    cancel: impl FnOnce(&mut Scheduler<i32, i32>) -> CancellationReport,
+) -> CancellationReport {
+    let (tx, _rx) = mpsc::channel();
+    let (started_tx, started_rx) = mpsc::channel();
+    let (release_tx, release_rx) = mpsc::channel();
+    let release_rx = Arc::new(Mutex::new(release_rx));
+    let mut sched: Scheduler<i32, i32> =
+        Scheduler::new(NonZeroUsize::new(1).unwrap(), tx, move |item: &i32| {
+            if *item == 0 {
+                started_tx.send(()).unwrap();
+                release_rx
+                    .lock()
+                    .unwrap()
+                    .recv_timeout(Duration::from_secs(2))
+                    .unwrap();
+            }
+            Ok(*item)
+        });
+
+    sched.request(0, Priority::Active, 0);
+    started_rx.recv_timeout(Duration::from_secs(2)).unwrap();
+    sched.request_scoped(
+        1,
+        Priority::Background,
+        1,
+        RequestScope::default()
+            .group("stale")
+            .source("stale")
+            .epoch_namespace("thumbnail"),
+    );
+    sched.request_scoped(
+        2,
+        Priority::Background,
+        2,
+        RequestScope::default()
+            .group("fresh")
+            .source("fresh")
+            .epoch_namespace("other"),
+    );
+
+    let report = cancel(&mut sched);
+    release_tx.send(()).unwrap();
+    report
 }
 
 #[test]
