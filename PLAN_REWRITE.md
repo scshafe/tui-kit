@@ -69,13 +69,13 @@ Cut modules come back only when:
 
 ## Phase 4 — Correctness and diagnostic-surface pass
 
-- **Path-prefixing bug** (`runtime.scheduler.scheduler.worker_count`).
+- **Path-prefixing bug** (`runtime.scheduler.scheduler.worker_count`) — obsolete after runtime/scheduler config demolition; keep future config paths contract-first.
 - **Audit every test that asserts a `ConfigError.path`**: rewrite from "what the code produces" to "what the docs/contract require."
-- **`DeterministicScheduler` cancellation parity**: implement scope-based cancellation, epoch namespaces, dedup-by-id with the same semantics as the real scheduler. Add property tests.
-- **`Cached.stats()`**: rename `replays` to `served` (or `cache_hits`/`cache_misses`).
-- **`watcher::is_relevant`**: classify each watched path at config time; stop calling `is_dir()` per event.
-- **`WatcherSourceId::new` vs `Validate`** (if it survives): one validates, the other delegates.
-- **README and PLAN.md**: rewrite both to describe the current state.
+- **`DeterministicScheduler` cancellation parity**: scope/id/group/source/epoch queued-cancellation parity now covered against the real scheduler; add property tests before expanding the double further.
+- **`Cached.stats()`**: done as `cache_hits` / `cache_misses`.
+- **`watcher::is_relevant`**: done; watched paths are classified once at spawn time.
+- **`WatcherSourceId::new` vs `Validate`** — obsolete after watcher config/source-id demolition.
+- **README and PLAN.md**: keep aligned with the current crate, not the historical roadmap.
 
 ## Phase 5 — Reinforcement
 

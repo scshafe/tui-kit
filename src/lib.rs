@@ -17,9 +17,9 @@
 //! crate test. The consumer-gate CI job exercises c4tui against the local
 //! tui-kit on every push.
 //!
-//! Module-level docs flag specific surfaces that have not yet been
-//! pressure-tested even though their host module has — for example, [`focus`]'s
-//! traversal API is unused by c4tui (which uses the modal stack only).
+//! Module-level docs flag surfaces that are consumer-driven, deliberately
+//! narrow, or removed pending consumer demand — for example, [`focus`] exposes
+//! only the modal stack c4tui uses, not generic traversal.
 //!
 //! See [`prelude`] for the most common imports. See `PLAN_REWRITE.md` for the
 //! design discipline.

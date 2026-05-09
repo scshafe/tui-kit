@@ -28,7 +28,12 @@ Early. Extracted from [c4tui](https://github.com/scshafe/c4tui) as the reusable 
 
 ## Removed pending consumer demand
 
-- `widgets::picker` was removed because c4tui uses its own app-specific `ViewPicker` and no real consumer validated the generic picker API. Reintroduce picker mechanics only with a named consumer in the same change set.
+These public surfaces were pruned after the c4tui migration showed no real consumer. Reintroduce any of them only with a named consumer in the same change set.
+
+- `widgets::picker`: c4tui uses its own app-specific `ViewPicker`; no real consumer validated the generic picker API.
+- `widgets::dialog` modal state/config/actions: c4tui only consumes the presentational `Dialog` widget.
+- `bar::Segment<Ctx>` / `SegmentBar<Ctx>` registry: c4tui consumes `StatusFragment`, `SegmentSlot`, and `layout_status_line`; app-owned segment traits fit borrowed status contexts better.
+- Generic focus traversal: c4tui consumes modal scope/capture only.
 
 ## Out of scope (today)
 
