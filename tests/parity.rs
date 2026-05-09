@@ -237,12 +237,85 @@ fn in_flight_cancellation_report_and_completion_drop_match() {
     assert!(real.completions.is_empty());
 }
 
+#[test]
+fn in_flight_id_cancellation_report_and_completion_drop_match() {
+    let mut det: DeterministicScheduler<i32, i32> = DeterministicScheduler::new(|item| Ok(*item));
+    det.request(7, Priority::Active, 7);
+    assert_eq!(det.begin_one(), Some(7));
+    let report = det.cancel_id(7);
+    assert_eq!(report.queued, 0);
+    assert_eq!(report.in_flight, 1);
+    assert_eq!(det.finish_in_flight(), None);
+    assert!(det.drain().is_empty());
+
+    let real = cancel_scoped_in_flight_on_real_scheduler(RequestScope::default(), |sched| {
+        sched.cancel_id(7)
+    });
+    assert_eq!(real.report, report);
+    assert!(real.completions.is_empty());
+}
+
+#[test]
+fn in_flight_source_cancellation_report_and_completion_drop_match() {
+    let mut det: DeterministicScheduler<i32, i32> = DeterministicScheduler::new(|item| Ok(*item));
+    det.request_scoped(
+        7,
+        Priority::Active,
+        7,
+        RequestScope::default().source("stale"),
+    );
+    assert_eq!(det.begin_one(), Some(7));
+    let report = det.cancel_source("stale");
+    assert_eq!(report.queued, 0);
+    assert_eq!(report.in_flight, 1);
+    assert_eq!(det.finish_in_flight(), None);
+    assert!(det.drain().is_empty());
+
+    let real = cancel_scoped_in_flight_on_real_scheduler(
+        RequestScope::default().source("stale"),
+        |sched| sched.cancel_source("stale"),
+    );
+    assert_eq!(real.report, report);
+    assert!(real.completions.is_empty());
+}
+
+#[test]
+fn in_flight_epoch_invalidation_report_and_completion_drop_match() {
+    let mut det: DeterministicScheduler<i32, i32> = DeterministicScheduler::new(|item| Ok(*item));
+    det.request_scoped(
+        7,
+        Priority::Active,
+        7,
+        RequestScope::default().epoch_namespace("thumbnail"),
+    );
+    assert_eq!(det.begin_one(), Some(7));
+    let report = det.invalidate_epoch_namespace("thumbnail");
+    assert_eq!(report.queued, 0);
+    assert_eq!(report.in_flight, 1);
+    assert_eq!(det.finish_in_flight(), None);
+    assert!(det.drain().is_empty());
+
+    let real = cancel_scoped_in_flight_on_real_scheduler(
+        RequestScope::default().epoch_namespace("thumbnail"),
+        |sched| sched.invalidate_epoch_namespace("thumbnail"),
+    );
+    assert_eq!(real.report, report);
+    assert!(real.completions.is_empty());
+}
+
 struct InFlightCancelOutcome {
     report: CancellationReport,
     completions: Vec<u64>,
 }
 
 fn cancel_in_flight_on_real_scheduler(
+    cancel: impl FnOnce(&mut Scheduler<i32, i32>) -> CancellationReport,
+) -> InFlightCancelOutcome {
+    cancel_scoped_in_flight_on_real_scheduler(RequestScope::default().group("stale"), cancel)
+}
+
+fn cancel_scoped_in_flight_on_real_scheduler(
+    scope: RequestScope,
     cancel: impl FnOnce(&mut Scheduler<i32, i32>) -> CancellationReport,
 ) -> InFlightCancelOutcome {
     let (tx, rx) = mpsc::channel();
@@ -260,12 +333,7 @@ fn cancel_in_flight_on_real_scheduler(
             Ok(*item)
         });
 
-    sched.request_scoped(
-        7,
-        Priority::Active,
-        7,
-        RequestScope::default().group("stale"),
-    );
+    sched.request_scoped(7, Priority::Active, 7, scope);
     started_rx.recv_timeout(Duration::from_secs(2)).unwrap();
     let report = cancel(&mut sched);
     release_tx.send(()).unwrap();
