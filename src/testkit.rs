@@ -179,7 +179,7 @@ pub fn test_cell_pixels(width: u32, height: u32) -> PixelSize {
 /// behavior: priority + FIFO ordering, dedup-by-id, scoped cancellation
 /// (`group`/`source`/`epoch_namespace`), epoch invalidation, completion drain
 /// semantics, and cancellation reports. The only difference is execution: work
-/// runs only when [`DeterministicScheduler::run_one`] or [`run_all`] is called.
+/// runs only when [`DeterministicScheduler::run_one`] or [`DeterministicScheduler::run_all`] is called.
 pub struct DeterministicScheduler<Item, Out, P: Ord + Clone = Priority> {
     queue: BinaryHeap<TestScheduledRequest<Item, P>>,
     queued: HashSet<u64>,

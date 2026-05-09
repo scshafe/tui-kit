@@ -2,7 +2,7 @@
 //!
 //! [`WorkspaceWatcher::spawn`] takes a list of paths and a debounce duration.
 //! Relevant filesystem events (Create/Modify/Remove) coalesce into a single
-//! [`AppEvent::Watcher`] carrying [`WatcherEvent::WorkspaceChanged`].
+//! [`AppEvent::Watcher`] carrying [`crate::events::WatcherEvent::WorkspaceChanged`].
 
 use crate::events::{AppEvent, AppEventSender};
 use anyhow::{Context, Result};
