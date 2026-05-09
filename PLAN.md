@@ -13,15 +13,15 @@
 > obviously useful," that is the speculative pattern again. Stop, and add the
 > consumer first.
 >
-> **Surfaces currently on probation:** focus traversal is in tree but not yet
-> pressure-tested by c4tui; `component`/`Cached` and modal focus are now consumed
-> by c4tui and should keep evolving through that feedback loop. A future tick
-> producer should only re-enter with c4tui heartbeat demand.
+> **Surfaces currently on probation:** `component`/`Cached` and modal focus are
+> now consumed by c4tui and should keep evolving through that feedback loop. A
+> future tick producer should only re-enter with c4tui heartbeat demand. Generic
+> focus traversal was pruned and should re-enter only with a named consumer.
 >
 > **Modules deliberately removed** (will re-enter only with named consumers):
 > `widgets::list`, `widgets::table`, `widgets::tree`, `widgets::tabs`, `theme`,
 > `runtime`, `subscription`, `widgets::picker`, `ImageConfig`, `WatcherConfig`,
-> `SchedulerConfig`.
+> `SchedulerConfig`, generic focus traversal.
 >
 > **Process gates** (see `.github/workflows/ci.yml`):
 > - `cargo fmt --check`, `clippy -D warnings`, `cargo test`, `cargo doc --no-deps`

@@ -14,9 +14,7 @@ pub use crate::events::{
     AppEvent, AppEventReceiver, AppEventSender, InputEvent, SchedulerEvent, TerminalEvent,
     WatcherEvent,
 };
-pub use crate::focus::{
-    FocusConfig, FocusId, FocusManager, FocusNode, FocusScopeKind, FocusTraversal,
-};
+pub use crate::focus::{FocusConfig, FocusId, FocusManager, FocusNode, FocusScopeKind};
 pub use crate::image::{
     picker_placement_id, ImageBackendPreference, ImageCapabilities, ImageProtocol, ImageSurface,
     ImageSurfaceRegistry, KittyImageRegistry, NoopImageSurface, PlaceOptions, TransparencySupport,

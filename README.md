@@ -12,7 +12,7 @@ Early. Extracted from [c4tui](https://github.com/scshafe/c4tui) as the reusable 
 |---|---|---|
 | `events` | Typed `AppEvent<UserEvent>` categories + unified channel: input, terminal, scheduler, watcher, user events | c4tui |
 | `component` | `Component` / `BufferComponent` traits, `ComponentId`, dirty-state invalidation, `Cached<C>` buffer caching | c4tui (`ViewPicker`) |
-| `focus` | `FocusManager` with stack-based modal/capturing scopes; `active_scope_id()` for distinguishing modal scopes | c4tui (modal stack — traversal API unused) |
+| `focus` | `FocusManager` with stack-based modal/capturing scopes; `active_scope_id()` for distinguishing modal scopes | c4tui (modal stack) |
 | `input` | `Key` enum mapped from crossterm events | c4tui |
 | `input_thread` | Detached input thread that pushes `InputEvent::Key` and `TerminalEvent::Resize` into the unified channel | c4tui |
 | `keymap` | `KeyMap<C>` registry generic over command type, `KeyTrigger → C` declarative bindings, last-binding-wins | c4tui (`KeyMap<PendingCommand>`) |
@@ -26,10 +26,6 @@ Early. Extracted from [c4tui](https://github.com/scshafe/c4tui) as the reusable 
 | `terminal` | `Terminal` wrapping `ratatui::Terminal<CrosstermBackend>` + image registry + raw-mode lifecycle | c4tui |
 | `testkit` | Widget buffer rendering helpers, typed event scripts, mock image surface, `DeterministicScheduler` | tests/parity.rs |
 
-## Open consumer-driven design questions
-
-- `focus::FocusTraversal` (Forward/Backward/Explicit) is unused. The traversal mechanics are not pressure-tested by any in-tree app.
-
 ## Removed pending consumer demand
 
 - `widgets::picker` was removed because c4tui uses its own app-specific `ViewPicker` and no real consumer validated the generic picker API. Reintroduce picker mechanics only with a named consumer in the same change set.
@@ -39,7 +35,7 @@ Early. Extracted from [c4tui](https://github.com/scshafe/c4tui) as the reusable 
 - Image surfaces other than Kitty graphics (Sixel, iTerm2)
 - Async runtimes (tokio/async-std) — uses sync threads + channels
 - Full component tree runtime orchestration
-- Theming, additional widgets (list/table/tree/tabs), runtime config bundles, subscription primitives, periodic tick producers — all deliberately removed pending consumer demand
+- Generic focus traversal, theming, additional widgets (list/table/tree/tabs), runtime config bundles, subscription primitives, periodic tick producers — all deliberately removed pending consumer demand
 
 ## License
 

@@ -1,15 +1,14 @@
-//! Explicit focus traversal and modal capture primitives.
+//! Explicit modal focus capture primitives.
 //!
 //! **Stability:** consumed by c4tui (modal stack for picker and dialog modes).
 //! The c4tui port surfaced one missing API ([`FocusManager::active_scope_id`])
 //! which has been added; further breaking changes should be motivated by
-//! additional ports. c4tui itself uses only the modal stack semantics; the
-//! traversal API (`Forward`/`Backward`/`Explicit`) has not yet been exercised
-//! by any in-tree consumer.
+//! additional ports. Generic traversal was removed because no in-tree consumer
+//! exercised it; it should re-enter only with an app port in the same change.
 //!
 //! Focus remains policy-light: apps decide which events mean "move focus" or
-//! "activate"; `tui-kit` provides stable IDs, inspectable scopes, traversal
-//! mechanics, and noisy validation for ambiguous focus graphs.
+//! "activate"; `tui-kit` provides stable IDs, inspectable scopes, modal capture,
+//! restoration, and noisy validation for ambiguous focus graphs.
 
 use serde::{Deserialize, Serialize};
 
@@ -83,7 +82,7 @@ impl FocusNode {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[non_exhaustive]
 pub enum FocusScopeKind {
-    /// Participates in normal traversal.
+    /// Root/default scope with no modal capture semantics.
     Normal,
     /// Captures focus until the scope is popped, then restores prior focus.
     Modal,
@@ -91,19 +90,9 @@ pub enum FocusScopeKind {
     Capturing,
 }
 
-/// App-selected traversal intent. Apps own key bindings; this enum owns only mechanics.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[non_exhaustive]
-pub enum FocusTraversal {
-    Forward,
-    Backward,
-    Explicit(FocusId),
-}
-
-/// Explicit focus traversal configuration.
+/// Explicit modal focus configuration.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct FocusConfig {
-    pub wrap: bool,
     pub restore_on_scope_pop: bool,
     pub require_initial_focus: bool,
 }
@@ -111,7 +100,6 @@ pub struct FocusConfig {
 impl FocusConfig {
     pub fn explicit() -> Self {
         Self {
-            wrap: true,
             restore_on_scope_pop: true,
             require_initial_focus: true,
         }
@@ -119,7 +107,6 @@ impl FocusConfig {
 
     pub fn headless_test() -> Self {
         Self {
-            wrap: false,
             restore_on_scope_pop: false,
             require_initial_focus: false,
         }
@@ -236,47 +223,6 @@ impl FocusManager {
         Some(popped.id)
     }
 
-    pub fn traverse(&mut self, traversal: FocusTraversal) -> Option<&FocusId> {
-        let next = match traversal {
-            FocusTraversal::Explicit(id) => self
-                .active_nodes()
-                .iter()
-                .find(|node| node.id == id && node.focusable())
-                .map(|node| node.id.clone()),
-            FocusTraversal::Forward => self.relative(1),
-            FocusTraversal::Backward => self.relative(-1),
-        };
-        if let Some(next) = next {
-            self.current = Some(next);
-        }
-        self.current()
-    }
-
-    fn relative(&self, delta: isize) -> Option<FocusId> {
-        let nodes: Vec<&FocusNode> = self
-            .active_nodes()
-            .iter()
-            .filter(|node| node.focusable())
-            .collect();
-        if nodes.is_empty() {
-            return None;
-        }
-        let current_index = self
-            .current
-            .as_ref()
-            .and_then(|current| nodes.iter().position(|node| &node.id == current))
-            .unwrap_or(0);
-        let raw = current_index as isize + delta;
-        let next = if self.config.wrap {
-            raw.rem_euclid(nodes.len() as isize) as usize
-        } else if raw < 0 || raw >= nodes.len() as isize {
-            current_index
-        } else {
-            raw as usize
-        };
-        Some(nodes[next].id.clone())
-    }
-
     fn active_nodes(&self) -> &[FocusNode] {
         self.scopes
             .last()
@@ -314,47 +260,19 @@ mod tests {
     }
 
     #[test]
-    fn traverses_focus_forward_and_backward_with_wrap() {
-        let mut manager =
-            FocusManager::new(FocusConfig::explicit(), nodes(&["a", "b", "c"])).unwrap();
-
-        assert_eq!(manager.current().unwrap().as_str(), "a");
-        assert_eq!(
-            manager.traverse(FocusTraversal::Forward).unwrap().as_str(),
-            "b"
-        );
-        assert_eq!(
-            manager.traverse(FocusTraversal::Forward).unwrap().as_str(),
-            "c"
-        );
-        assert_eq!(
-            manager.traverse(FocusTraversal::Forward).unwrap().as_str(),
-            "a"
-        );
-        assert_eq!(
-            manager.traverse(FocusTraversal::Backward).unwrap().as_str(),
-            "c"
-        );
-    }
-
-    #[test]
     fn modal_scope_captures_and_restores_focus() {
-        let mut manager =
-            FocusManager::new(FocusConfig::explicit(), nodes(&["main", "side"])).unwrap();
-        manager.traverse(FocusTraversal::Explicit(FocusId::new("side")));
+        let mut manager = FocusManager::new(FocusConfig::explicit(), nodes(&["main"])).unwrap();
 
         manager
             .push_scope("dialog", FocusScopeKind::Modal, nodes(&["ok", "cancel"]))
             .unwrap();
         assert_eq!(manager.active_scope_kind(), FocusScopeKind::Modal);
+        assert_eq!(manager.active_scope_id().unwrap().as_str(), "dialog");
         assert_eq!(manager.current().unwrap().as_str(), "ok");
-        assert_eq!(
-            manager.traverse(FocusTraversal::Forward).unwrap().as_str(),
-            "cancel"
-        );
 
         assert_eq!(manager.pop_scope().unwrap().as_str(), "dialog");
-        assert_eq!(manager.current().unwrap().as_str(), "side");
+        assert_eq!(manager.active_scope_id().unwrap().as_str(), "root");
+        assert_eq!(manager.current().unwrap().as_str(), "main");
     }
 
     #[test]
@@ -362,24 +280,5 @@ mod tests {
         let error = FocusManager::new(FocusConfig::explicit(), nodes(&["dup", "dup"])).unwrap_err();
         assert_eq!(error.path, "focus.root");
         assert!(error.reason.contains("duplicate"));
-    }
-
-    #[test]
-    fn skips_disabled_and_hidden_nodes() {
-        let mut manager = FocusManager::new(
-            FocusConfig::explicit(),
-            vec![
-                FocusNode::new("a").disabled(),
-                FocusNode::new("b"),
-                FocusNode::new("c").hidden(),
-            ],
-        )
-        .unwrap();
-
-        assert_eq!(manager.current().unwrap().as_str(), "b");
-        assert_eq!(
-            manager.traverse(FocusTraversal::Forward).unwrap().as_str(),
-            "b"
-        );
     }
 }
