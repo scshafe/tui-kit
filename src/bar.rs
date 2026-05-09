@@ -1,17 +1,10 @@
 //! Slot-aligned, priority-truncated text bars.
 //!
-//! A [`SegmentBar<Ctx>`] is a registry of [`Segment<Ctx>`] producers. At
-//! render time, each segment may emit a [`StatusFragment`] given a
-//! user-defined context `Ctx`. The bar composes left- and right-aligned
-//! fragments separated by a configurable string, padding the middle with
-//! spaces. When fragments don't fit the available width, the lowest-
-//! priority fragment is dropped first (across both sides), repeatedly,
-//! until everything fits — or until the bar truncates with an ellipsis.
-//!
-//! `Ctx` is application-specific. tui-kit ships no built-in segments;
-//! apps register their own.
-
-use std::marker::PhantomData;
+//! tui-kit intentionally keeps this module at the data/algorithm layer for
+//! now: c4tui's status contexts borrow per-render application state, so a
+//! stored generic segment registry would force the wrong lifetime shape. Apps
+//! own their segment traits and can share [`StatusFragment`], [`SegmentSlot`],
+//! and [`layout_status_line`] for deterministic composition.
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SegmentSlot {
@@ -39,109 +32,8 @@ impl StatusFragment {
     }
 }
 
-pub trait Segment<Ctx>: std::fmt::Debug {
-    fn id(&self) -> &'static str;
-    fn render(&self, ctx: &Ctx) -> Option<StatusFragment>;
-}
-
-pub struct SegmentBar<Ctx> {
-    segments: Vec<(SegmentSlot, Box<dyn Segment<Ctx> + Send + Sync>)>,
-    separator: &'static str,
-    elide: &'static str,
-    _marker: PhantomData<Ctx>,
-}
-
-impl<Ctx> std::fmt::Debug for SegmentBar<Ctx> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("SegmentBar")
-            .field("segments", &self.segments.len())
-            .field("separator", &self.separator)
-            .field("elide", &self.elide)
-            .finish()
-    }
-}
-
-impl<Ctx> SegmentBar<Ctx> {
-    pub fn builder() -> SegmentBarBuilder<Ctx> {
-        SegmentBarBuilder::default()
-    }
-
-    pub fn render(&self, ctx: &Ctx, width: u16) -> String {
-        let collect = |slot: SegmentSlot| -> Vec<StatusFragment> {
-            self.segments
-                .iter()
-                .filter(|(s, _)| *s == slot)
-                .filter_map(|(_, seg)| seg.render(ctx))
-                .collect()
-        };
-        let left = collect(SegmentSlot::Left);
-        let right = collect(SegmentSlot::Right);
-
-        let width = usize::from(width).max(1);
-        layout_status_line(left, right, width, self.separator, self.elide)
-    }
-}
-
-pub struct SegmentBarBuilder<Ctx> {
-    segments: Vec<(SegmentSlot, Box<dyn Segment<Ctx> + Send + Sync>)>,
-    separator: Option<&'static str>,
-    elide: Option<&'static str>,
-    _marker: PhantomData<Ctx>,
-}
-
-impl<Ctx> std::fmt::Debug for SegmentBarBuilder<Ctx> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("SegmentBarBuilder")
-            .field("segments", &self.segments.len())
-            .finish()
-    }
-}
-
-impl<Ctx> Default for SegmentBarBuilder<Ctx> {
-    fn default() -> Self {
-        Self {
-            segments: Vec::new(),
-            separator: None,
-            elide: None,
-            _marker: PhantomData,
-        }
-    }
-}
-
-impl<Ctx> SegmentBarBuilder<Ctx> {
-    pub fn add(
-        mut self,
-        slot: SegmentSlot,
-        segment: impl Segment<Ctx> + Send + Sync + 'static,
-    ) -> Self {
-        self.segments.push((slot, Box::new(segment)));
-        self
-    }
-
-    pub fn separator(mut self, sep: &'static str) -> Self {
-        self.separator = Some(sep);
-        self
-    }
-
-    pub fn elide(mut self, elide: &'static str) -> Self {
-        self.elide = Some(elide);
-        self
-    }
-
-    pub fn build(self) -> SegmentBar<Ctx> {
-        SegmentBar {
-            segments: self.segments,
-            separator: self.separator.unwrap_or(" | "),
-            elide: self.elide.unwrap_or("…"),
-            _marker: PhantomData,
-        }
-    }
-}
-
 /// Compose a left/right status line, dropping the lowest-priority fragment
-/// across both sides until the line fits `width`. Public so apps can share
-/// the truncation algorithm without using tui-kit's [`Segment`] trait — useful
-/// when a segment context has borrowed fields that don't fit `Segment<Ctx>`.
+/// across both sides until the line fits `width`.
 pub fn layout_status_line(
     left: Vec<StatusFragment>,
     right: Vec<StatusFragment>,
@@ -237,55 +129,18 @@ pub(crate) fn visible_width(text: &str) -> usize {
 mod tests {
     use super::*;
 
-    #[derive(Debug)]
-    struct TestCtx {
-        zoom: f32,
-    }
-
-    #[derive(Debug)]
-    struct AppName;
-    impl Segment<TestCtx> for AppName {
-        fn id(&self) -> &'static str {
-            "app_name"
-        }
-        fn render(&self, _: &TestCtx) -> Option<StatusFragment> {
-            Some(StatusFragment::new("kit").with_priority(255))
-        }
-    }
-
-    #[derive(Debug)]
-    struct Zoom;
-    impl Segment<TestCtx> for Zoom {
-        fn id(&self) -> &'static str {
-            "zoom"
-        }
-        fn render(&self, ctx: &TestCtx) -> Option<StatusFragment> {
-            Some(StatusFragment::new(format!("{:.0}%", ctx.zoom * 100.0)).with_priority(180))
-        }
-    }
-
-    #[derive(Debug)]
-    struct Hint;
-    impl Segment<TestCtx> for Hint {
-        fn id(&self) -> &'static str {
-            "hint"
-        }
-        fn render(&self, _: &TestCtx) -> Option<StatusFragment> {
-            Some(StatusFragment::new("press q to quit").with_priority(40))
-        }
-    }
-
-    fn bar() -> SegmentBar<TestCtx> {
-        SegmentBar::builder()
-            .add(SegmentSlot::Left, AppName)
-            .add(SegmentSlot::Left, Zoom)
-            .add(SegmentSlot::Right, Hint)
-            .build()
-    }
-
     #[test]
     fn renders_full_width() {
-        let line = bar().render(&TestCtx { zoom: 1.0 }, 80);
+        let line = layout_status_line(
+            vec![
+                StatusFragment::new("kit").with_priority(255),
+                StatusFragment::new("100%").with_priority(180),
+            ],
+            vec![StatusFragment::new("press q to quit").with_priority(40)],
+            80,
+            " | ",
+            "…",
+        );
         assert_eq!(line.chars().count(), 80);
         assert!(line.starts_with("kit"));
         assert!(line.trim_end().ends_with("press q to quit"));
@@ -293,7 +148,16 @@ mod tests {
 
     #[test]
     fn drops_lowest_priority_when_narrow() {
-        let line = bar().render(&TestCtx { zoom: 1.0 }, 12);
+        let line = layout_status_line(
+            vec![
+                StatusFragment::new("kit").with_priority(255),
+                StatusFragment::new("100%").with_priority(180),
+            ],
+            vec![StatusFragment::new("press q to quit").with_priority(40)],
+            12,
+            " | ",
+            "…",
+        );
         assert!(line.contains("kit"));
         assert!(!line.contains("press q to quit"));
     }

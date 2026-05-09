@@ -19,7 +19,7 @@ Early. Extracted from [c4tui](https://github.com/scshafe/c4tui) as the reusable 
 | `tty` | `terminal_metrics()` reading both cell and pixel dimensions via TIOCGWINSZ | c4tui |
 | `image` | `KittyImageRegistry` + `ImageSurface` trait — transmit-once-place-many image lifecycle | c4tui |
 | `layout` | `PixelSize`, `CellSize`, `CanvasMetrics`, `ViewTransform`, `Placement` — fit/zoom/pan math | c4tui |
-| `bar` | `StatusFragment`, `SegmentSlot`, `Segment<Ctx>` trait, `SegmentBar<Ctx>`, `layout_status_line` truncation | c4tui (data types + algorithm — `Segment<Ctx>` doesn't fit borrowed contexts; see open issue) |
+| `bar` | `StatusFragment`, `SegmentSlot`, `layout_status_line` priority truncation | c4tui |
 | `scheduler` | Priority-queue task scheduler with custom-priority generic, scoped cancellation, machine-readable queue/timing stats | c4tui |
 | `watcher` | notify-based file watcher with debounce, emits `WatcherEvent::WorkspaceChanged` | c4tui |
 | `widgets::dialog` | `Dialog` widget for bordered modal text rendering | c4tui |
@@ -28,7 +28,6 @@ Early. Extracted from [c4tui](https://github.com/scshafe/c4tui) as the reusable 
 
 ## Open consumer-driven design questions
 
-- `Segment<Ctx>` trait can't accept contexts with borrowed fields. c4tui's `StatusContext<'a>` falls back to a c4tui-internal trait. Resolving this likely requires a HRTB-friendly redesign or moving to owned contexts.
 - `focus::FocusTraversal` (Forward/Backward/Explicit) is unused. The traversal mechanics are not pressure-tested by any in-tree app.
 
 ## Removed pending consumer demand

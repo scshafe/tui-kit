@@ -4,7 +4,7 @@
 //! use tui_kit::prelude::*;
 //! ```
 
-pub use crate::bar::{Segment, SegmentBar, SegmentSlot, StatusFragment};
+pub use crate::bar::{SegmentSlot, StatusFragment};
 pub use crate::component::{
     BufferComponent, Cached, CachedRenderStats, Component, ComponentChildren, ComponentId,
     ComponentOutcome, DirtyReason, DirtyState,
