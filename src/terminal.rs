@@ -68,8 +68,18 @@ impl TerminalConfig {
 
 impl Validate for TerminalConfig {
     fn validate(&self) -> Result<(), ConfigError> {
-        self.image_backend.validate()
+        self.image_backend
+            .validate()
+            .map_err(|error| terminal_image_backend_error(error.path, error.reason))
     }
+}
+
+fn terminal_image_backend_error(path: String, reason: String) -> ConfigError {
+    let leaf = path
+        .strip_prefix("image.backend.")
+        .or_else(|| path.strip_prefix("image."))
+        .unwrap_or(path.as_str());
+    ConfigError::new(format!("terminal.image_backend.{leaf}"), reason)
 }
 
 pub struct Terminal {
@@ -99,7 +109,8 @@ impl Terminal {
     /// currently unimplemented protocols fail before terminal setup begins.
     pub fn enter_with_config(config: TerminalConfig) -> Result<Self> {
         config.validate()?;
-        let images = ImageSurfaceRegistry::from_preference(config.image_backend)?;
+        let images = ImageSurfaceRegistry::from_preference(config.image_backend)
+            .map_err(|error| terminal_image_backend_error(error.path, error.reason))?;
         crossterm::terminal::enable_raw_mode()?;
         let mut stdout = io::stdout();
         crossterm::execute!(
@@ -174,7 +185,7 @@ mod tests {
         .validate()
         .unwrap_err();
 
-        assert_eq!(error.path, "image.backend.order");
+        assert_eq!(error.path, "terminal.image_backend.order");
     }
 
     #[test]
@@ -187,6 +198,17 @@ mod tests {
         .validate()
         .unwrap_err();
 
-        assert_eq!(error.path, "image.backend.order");
+        assert_eq!(error.path, "terminal.image_backend.order");
+    }
+
+    #[test]
+    fn terminal_config_rewrites_image_backend_paths_without_doubling() {
+        let error = terminal_image_backend_error(
+            "image.backend.protocol".to_string(),
+            "not implemented".to_string(),
+        );
+
+        assert_eq!(error.path, "terminal.image_backend.protocol");
+        assert!(!error.path.contains("backend.backend"));
     }
 }
