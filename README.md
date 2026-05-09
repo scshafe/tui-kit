@@ -23,7 +23,7 @@ Early. Extracted from [c4tui](https://github.com/scshafe/c4tui) as the reusable 
 | `scheduler` | Priority-queue task scheduler with custom-priority generic, scoped cancellation, machine-readable queue/timing stats | c4tui |
 | `watcher` | notify-based file watcher with debounce, emits `WatcherEvent::WorkspaceChanged` | c4tui |
 | `widgets::picker` | Generic list-with-detail-and-thumbnails picker, fuzzy filter, scrollable, selection highlight | _no consumer — c4tui has its own ViewPicker_ |
-| `widgets::dialog` | `Dialog` widget for bordered modal text rendering; `DialogState` for confirm/cancel/focus actions | c4tui (uses `Dialog` only — `DialogState` unused) |
+| `widgets::dialog` | `Dialog` widget for bordered modal text rendering | c4tui |
 | `terminal` | `Terminal` wrapping `ratatui::Terminal<CrosstermBackend>` + image registry + raw-mode lifecycle | c4tui |
 | `testkit` | Widget buffer rendering helpers, typed event scripts, mock image surface, `DeterministicScheduler` | tests/parity.rs |
 
