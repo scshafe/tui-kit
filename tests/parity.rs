@@ -279,14 +279,66 @@ fn cancel_in_flight_on_real_scheduler(
 }
 
 #[test]
-fn invalidate_all_drops_pending_work_in_both() {
+fn invalidate_all_drops_queued_and_in_flight_work_in_both() {
     let mut det: DeterministicScheduler<i32, i32> = DeterministicScheduler::new(|item| Ok(*item));
     det.request(1, Priority::Active, 1);
     det.request(2, Priority::Active, 2);
+    assert_eq!(det.begin_one(), Some(1));
     det.invalidate_all();
     det.request(3, Priority::Active, 3);
+    assert_eq!(det.finish_in_flight(), None);
 
     let ran = det.run_all();
     assert_eq!(ran, vec![3]);
     assert_eq!(det.cancelled_total(), 2);
+    assert_eq!(
+        det.drain().into_iter().map(|c| c.id).collect::<Vec<_>>(),
+        vec![3]
+    );
+
+    let real = invalidate_all_on_real_scheduler();
+    assert_eq!(real.cancelled_total, det.cancelled_total());
+    assert_eq!(real.completions, vec![3]);
+}
+
+struct InvalidateAllOutcome {
+    cancelled_total: usize,
+    completions: Vec<u64>,
+}
+
+fn invalidate_all_on_real_scheduler() -> InvalidateAllOutcome {
+    let (tx, rx) = mpsc::channel();
+    let (started_tx, started_rx) = mpsc::channel();
+    let (release_tx, release_rx) = mpsc::channel();
+    let release_rx = Arc::new(Mutex::new(release_rx));
+    let mut sched: Scheduler<i32, i32> =
+        Scheduler::new(NonZeroUsize::new(1).unwrap(), tx, move |item: &i32| {
+            if *item == 1 {
+                started_tx.send(()).unwrap();
+                release_rx
+                    .lock()
+                    .unwrap()
+                    .recv_timeout(Duration::from_secs(2))
+                    .unwrap();
+            }
+            Ok(*item)
+        });
+
+    sched.request(1, Priority::Active, 1);
+    sched.request(2, Priority::Active, 2);
+    started_rx.recv_timeout(Duration::from_secs(2)).unwrap();
+    sched.invalidate_all();
+    sched.request(3, Priority::Active, 3);
+    release_tx.send(()).unwrap();
+
+    for _ in 0..2 {
+        rx.recv_timeout(Duration::from_secs(2)).unwrap();
+    }
+
+    let cancelled_total = sched.stats().cancelled_total;
+    let completions = sched.drain().into_iter().map(|c| c.id).collect();
+    InvalidateAllOutcome {
+        cancelled_total,
+        completions,
+    }
 }
