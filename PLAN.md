@@ -13,15 +13,15 @@
 > obviously useful," that is the speculative pattern again. Stop, and add the
 > consumer first.
 >
-> **Modules currently on probation** (in tree, no consumer): `component`,
-> `focus`, `tick`. Their docs say `Stability: experimental`. They will earn
-> stability when c4tui ports the picker (Component+Cached), the modal routing
-> (Focus), and the heartbeat (Tick) onto them — _and_ those ports survive a
-> review.
+> **Surfaces currently on probation:** focus traversal is in tree but not yet
+> pressure-tested by c4tui; `component`/`Cached` and modal focus are now consumed
+> by c4tui and should keep evolving through that feedback loop. A future tick
+> producer should only re-enter with c4tui heartbeat demand.
 >
 > **Modules deliberately removed** (will re-enter only with named consumers):
 > `widgets::list`, `widgets::table`, `widgets::tree`, `widgets::tabs`, `theme`,
-> `runtime`, `subscription`, `ImageConfig`, `WatcherConfig`, `SchedulerConfig`.
+> `runtime`, `subscription`, `widgets::picker`, `ImageConfig`, `WatcherConfig`,
+> `SchedulerConfig`.
 >
 > **Process gates** (see `.github/workflows/ci.yml`):
 > - `cargo fmt --check`, `clippy -D warnings`, `cargo test`, `cargo doc --no-deps`

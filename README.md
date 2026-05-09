@@ -22,7 +22,6 @@ Early. Extracted from [c4tui](https://github.com/scshafe/c4tui) as the reusable 
 | `bar` | `StatusFragment`, `SegmentSlot`, `Segment<Ctx>` trait, `SegmentBar<Ctx>`, `layout_status_line` truncation | c4tui (data types + algorithm — `Segment<Ctx>` doesn't fit borrowed contexts; see open issue) |
 | `scheduler` | Priority-queue task scheduler with custom-priority generic, scoped cancellation, machine-readable queue/timing stats | c4tui |
 | `watcher` | notify-based file watcher with debounce, emits `WatcherEvent::WorkspaceChanged` | c4tui |
-| `widgets::picker` | Generic list-with-detail-and-thumbnails picker, fuzzy filter, scrollable, selection highlight | _no consumer — c4tui has its own ViewPicker_ |
 | `widgets::dialog` | `Dialog` widget for bordered modal text rendering | c4tui |
 | `terminal` | `Terminal` wrapping `ratatui::Terminal<CrosstermBackend>` + image registry + raw-mode lifecycle | c4tui |
 | `testkit` | Widget buffer rendering helpers, typed event scripts, mock image surface, `DeterministicScheduler` | tests/parity.rs |
@@ -30,8 +29,11 @@ Early. Extracted from [c4tui](https://github.com/scshafe/c4tui) as the reusable 
 ## Open consumer-driven design questions
 
 - `Segment<Ctx>` trait can't accept contexts with borrowed fields. c4tui's `StatusContext<'a>` falls back to a c4tui-internal trait. Resolving this likely requires a HRTB-friendly redesign or moving to owned contexts.
-- `widgets::picker` has no consumer. c4tui's picker is c4tui-specific and lives in c4tui. Likely to be deleted unless a second consumer arrives.
 - `focus::FocusTraversal` (Forward/Backward/Explicit) is unused. The traversal mechanics are not pressure-tested by any in-tree app.
+
+## Removed pending consumer demand
+
+- `widgets::picker` was removed because c4tui uses its own app-specific `ViewPicker` and no real consumer validated the generic picker API. Reintroduce picker mechanics only with a named consumer in the same change set.
 
 ## Out of scope (today)
 
