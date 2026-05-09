@@ -13,7 +13,7 @@ pub use crate::component::{
     BufferComponent, Cached, CachedRenderStats, Component, ComponentChildren, ComponentId,
     ComponentOutcome, DirtyReason, DirtyState,
 };
-pub use crate::config::{ConfigError, KitConfig, Validate};
+pub use crate::config::{ConfigError, Validate};
 pub use crate::events::{
     AppEvent, AppEventReceiver, AppEventSender, InputEvent, SchedulerEvent, TerminalEvent,
     WatcherEvent,

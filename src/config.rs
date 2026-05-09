@@ -38,7 +38,3 @@ impl Error for ConfigError {}
 pub trait Validate {
     fn validate(&self) -> Result<(), ConfigError>;
 }
-
-pub trait KitConfig: Validate + Clone + fmt::Debug {}
-
-impl<T> KitConfig for T where T: Validate + Clone + fmt::Debug {}
