@@ -251,6 +251,12 @@ pub enum ImageOverflowPolicy {
     CropSourceToArea,
     OverflowAndClipDestination,
     PreventZoomBeyondArea,
+    /// The image's logical cell rectangle is allowed to exceed canvas bounds.
+    /// Sample window math is the same as [`CropSourceToArea`] (so panning still
+    /// works), but `target` cell extent is computed from the unclipped display
+    /// size and `clipped_sides` reports the overflow. The consumer decides
+    /// whether to clamp the cell rect before issuing terminal placements.
+    OverflowCellsBeyondArea,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
@@ -548,7 +554,7 @@ fn place_with_policy(
         ImageOverflowPolicy::FitWithinArea
         | ImageOverflowPolicy::OverflowAndClipDestination
         | ImageOverflowPolicy::PreventZoomBeyondArea => (image.width.max(1), image.height.max(1)),
-        ImageOverflowPolicy::CropSourceToArea => (
+        ImageOverflowPolicy::CropSourceToArea | ImageOverflowPolicy::OverflowCellsBeyondArea => (
             ((visible_w / effective).round() as u32).clamp(1, image.width.max(1)),
             ((visible_h / effective).round() as u32).clamp(1, image.height.max(1)),
         ),
@@ -586,13 +592,26 @@ fn place_with_policy(
 
     let cell_w = cell_pixel.width.max(1) as f32;
     let cell_h = cell_pixel.height.max(1) as f32;
-    let target_cols =
-        round_cells(visible_w / cell_w, policy.cell_rounding).clamp(1, canvas.cells.cols.max(1));
-    let target_rows =
-        round_cells(visible_h / cell_h, policy.cell_rounding).clamp(1, canvas.cells.rows.max(1));
-
-    let origin_col = canvas.cells.cols.saturating_sub(target_cols) / 2;
-    let origin_row = canvas.cells.rows.saturating_sub(target_rows) / 2;
+    let (target_cols, target_rows, origin_col, origin_row) = if matches!(
+        policy.overflow,
+        ImageOverflowPolicy::OverflowCellsBeyondArea
+    ) {
+        // Report the unclipped cell extent based on the full display size so
+        // consumers can decide what to do with cell rects that exceed
+        // canvas. Origin stays at the top-left of canvas; pan via center_x
+        // is honoured through the source crop above.
+        let cols = round_cells(display_w / cell_w, policy.cell_rounding).max(1);
+        let rows = round_cells(display_h / cell_h, policy.cell_rounding).max(1);
+        (cols, rows, 0, 0)
+    } else {
+        let cols = round_cells(visible_w / cell_w, policy.cell_rounding)
+            .clamp(1, canvas.cells.cols.max(1));
+        let rows = round_cells(visible_h / cell_h, policy.cell_rounding)
+            .clamp(1, canvas.cells.rows.max(1));
+        let origin_col = canvas.cells.cols.saturating_sub(cols) / 2;
+        let origin_row = canvas.cells.rows.saturating_sub(rows) / 2;
+        (cols, rows, origin_col, origin_row)
+    };
     let clipped_sides = clipped_sides(
         image,
         canvas_pixels,
@@ -652,7 +671,8 @@ fn clipped_sides(
             top: src_y > 0,
             bottom: src_y.saturating_add(src_h) < image.height,
         },
-        ImageOverflowPolicy::OverflowAndClipDestination => {
+        ImageOverflowPolicy::OverflowAndClipDestination
+        | ImageOverflowPolicy::OverflowCellsBeyondArea => {
             let horizontal = display_w > visible_w || display_w > canvas_pixels.width as f32;
             let vertical = display_h > visible_h || display_h > canvas_pixels.height as f32;
             ClippedSides {
@@ -893,6 +913,26 @@ mod tests {
         assert_eq!(placement.source.height, image.height);
         assert_eq!(placement.clipped_sides, ClippedSides::NONE);
         assert!(!placement.clipped_sides.any());
+    }
+
+    #[test]
+    fn overflow_cells_beyond_area_lets_target_exceed_canvas() {
+        let image = PixelSize::new(4000, 2000);
+        let canvas = canvas(100, 50);
+        let policy = PlacementPolicy {
+            overflow: ImageOverflowPolicy::OverflowCellsBeyondArea,
+            ..PlacementPolicy::crop_fit_centered()
+        };
+        let placement = PlacementEngine::new(policy).unwrap().place(
+            image,
+            canvas,
+            ViewTransform::fit().with_scale(2.0),
+        );
+
+        assert!(placement.size.cols > canvas.cells.cols);
+        assert_eq!(placement.origin.col, 0);
+        assert_eq!(placement.origin.row, 0);
+        assert!(placement.clipped_sides.any());
     }
 
     #[test]
