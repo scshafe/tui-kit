@@ -586,6 +586,36 @@ fn invalidate_all_drops_queued_and_in_flight_work_in_both() {
     assert_eq!(real.completions, vec![3]);
 }
 
+#[test]
+fn invalidate_all_resets_successful_id_dedup_in_both() {
+    let mut det: DeterministicScheduler<i32, i32> = DeterministicScheduler::new(|item| Ok(*item));
+    det.request(7, Priority::Active, 10);
+    assert_eq!(det.run_one(), Some(7));
+    assert_eq!(
+        det.drain()
+            .into_iter()
+            .map(|c| (c.id, *c.result.as_ref().unwrap()))
+            .collect::<Vec<_>>(),
+        vec![(7, 10)]
+    );
+
+    det.request(7, Priority::Active, 20);
+    assert_eq!(det.run_one(), None, "completed IDs dedup until invalidated");
+
+    det.invalidate_all();
+    det.request(7, Priority::Active, 30);
+    assert_eq!(det.run_one(), Some(7));
+    let det_completions: Vec<(u64, i32)> = det
+        .drain()
+        .into_iter()
+        .map(|c| (c.id, *c.result.as_ref().unwrap()))
+        .collect();
+    assert_eq!(det_completions, vec![(7, 30)]);
+
+    let real = resubmit_successful_id_after_invalidate_all_on_real_scheduler();
+    assert_eq!(real, det_completions);
+}
+
 struct InvalidateAllOutcome {
     cancelled_total: usize,
     completions: Vec<u64>,
@@ -626,4 +656,36 @@ fn invalidate_all_on_real_scheduler() -> InvalidateAllOutcome {
         cancelled_total,
         completions,
     }
+}
+
+fn resubmit_successful_id_after_invalidate_all_on_real_scheduler() -> Vec<(u64, i32)> {
+    let (tx, rx) = mpsc::channel();
+    let mut sched: Scheduler<i32, i32> =
+        Scheduler::new(NonZeroUsize::new(1).unwrap(), tx, |item: &i32| Ok(*item));
+
+    sched.request(7, Priority::Active, 10);
+    rx.recv_timeout(Duration::from_secs(2)).unwrap();
+    assert_eq!(
+        sched
+            .drain()
+            .into_iter()
+            .map(|c| (c.id, *c.result.as_ref().unwrap()))
+            .collect::<Vec<_>>(),
+        vec![(7, 10)]
+    );
+
+    sched.request(7, Priority::Active, 20);
+    assert!(
+        rx.recv_timeout(Duration::from_millis(100)).is_err(),
+        "completed IDs dedup until invalidated"
+    );
+
+    sched.invalidate_all();
+    sched.request(7, Priority::Active, 30);
+    rx.recv_timeout(Duration::from_secs(2)).unwrap();
+    sched
+        .drain()
+        .into_iter()
+        .map(|c| (c.id, *c.result.as_ref().unwrap()))
+        .collect()
 }
