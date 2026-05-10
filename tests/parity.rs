@@ -63,8 +63,57 @@ fn dedup_by_id_matches() {
     det.request(1, Priority::Active, 2); // ignored
     assert_eq!(det.queued_len(), 1);
     det.run_all();
+    let det_completions: Vec<(u64, i32)> = det
+        .drain()
+        .into_iter()
+        .map(|c| (c.id, *c.result.as_ref().unwrap()))
+        .collect();
+    assert_eq!(det_completions, vec![(1, 1)]);
     det.request(1, Priority::Active, 3); // also ignored — already completed
     assert_eq!(det.queued_len(), 0);
+
+    let real = dedup_by_id_on_real_scheduler();
+    assert_eq!(real, det_completions);
+}
+
+fn dedup_by_id_on_real_scheduler() -> Vec<(u64, i32)> {
+    let (tx, rx) = mpsc::channel();
+    let (started_tx, started_rx) = mpsc::channel();
+    let (release_tx, release_rx) = mpsc::channel();
+    let release_rx = Arc::new(Mutex::new(release_rx));
+    let mut sched: Scheduler<i32, i32> =
+        Scheduler::new(NonZeroUsize::new(1).unwrap(), tx, move |item: &i32| {
+            if *item == 0 {
+                started_tx.send(()).unwrap();
+                release_rx
+                    .lock()
+                    .unwrap()
+                    .recv_timeout(Duration::from_secs(2))
+                    .unwrap();
+            }
+            Ok(*item)
+        });
+
+    sched.request(0, Priority::Active, 0);
+    started_rx.recv_timeout(Duration::from_secs(2)).unwrap();
+    sched.request(1, Priority::Background, 1);
+    sched.request(1, Priority::Background, 2); // ignored while queued
+    release_tx.send(()).unwrap();
+
+    for _ in 0..2 {
+        rx.recv_timeout(Duration::from_secs(2)).unwrap();
+    }
+    let completions: Vec<(u64, i32)> = sched
+        .drain()
+        .into_iter()
+        .filter_map(|c| c.result.ok().map(|out| (c.id, out)))
+        .filter(|(id, _)| *id == 1)
+        .collect();
+
+    sched.request(1, Priority::Background, 3); // ignored after successful completion
+    assert!(rx.recv_timeout(Duration::from_millis(100)).is_err());
+
+    completions
 }
 
 #[test]
