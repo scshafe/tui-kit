@@ -109,6 +109,130 @@ fn failed_id_resubmission_matches() {
 }
 
 #[test]
+fn cancelled_queued_id_resubmission_matches() {
+    let mut det: DeterministicScheduler<i32, i32> = DeterministicScheduler::new(|item| Ok(*item));
+    det.request(7, Priority::Active, 10);
+    let report = det.cancel_id(7);
+    assert_eq!(report.queued, 1);
+    assert_eq!(report.in_flight, 0);
+    det.request(7, Priority::Active, 20);
+    assert_eq!(det.run_one(), Some(7));
+    let det_completion = det.drain().pop().unwrap();
+    assert_eq!(det_completion.id, 7);
+    assert_eq!(*det_completion.result.as_ref().unwrap(), 20);
+
+    let real = resubmit_cancelled_queued_id_on_real_scheduler();
+    assert_eq!(real.report, report);
+    assert_eq!(real.completions, vec![(7, 20)]);
+}
+
+#[test]
+fn cancelled_in_flight_id_resubmission_matches() {
+    let mut det: DeterministicScheduler<i32, i32> = DeterministicScheduler::new(|item| Ok(*item));
+    det.request(7, Priority::Active, 10);
+    assert_eq!(det.begin_one(), Some(7));
+    let report = det.cancel_id(7);
+    assert_eq!(report.queued, 0);
+    assert_eq!(report.in_flight, 1);
+    assert_eq!(det.finish_in_flight(), None);
+    assert!(det.drain().is_empty());
+    det.request(7, Priority::Active, 20);
+    assert_eq!(det.run_one(), Some(7));
+    let det_completion = det.drain().pop().unwrap();
+    assert_eq!(det_completion.id, 7);
+    assert_eq!(*det_completion.result.as_ref().unwrap(), 20);
+
+    let real = resubmit_cancelled_in_flight_id_on_real_scheduler();
+    assert_eq!(real.report, report);
+    assert_eq!(real.completions, vec![(7, 20)]);
+}
+
+struct ResubmissionOutcome {
+    report: CancellationReport,
+    completions: Vec<(u64, i32)>,
+}
+
+fn resubmit_cancelled_queued_id_on_real_scheduler() -> ResubmissionOutcome {
+    let (tx, rx) = mpsc::channel();
+    let (started_tx, started_rx) = mpsc::channel();
+    let (release_tx, release_rx) = mpsc::channel();
+    let release_rx = Arc::new(Mutex::new(release_rx));
+    let mut sched: Scheduler<i32, i32> =
+        Scheduler::new(NonZeroUsize::new(1).unwrap(), tx, move |item: &i32| {
+            if *item == 0 {
+                started_tx.send(()).unwrap();
+                release_rx
+                    .lock()
+                    .unwrap()
+                    .recv_timeout(Duration::from_secs(2))
+                    .unwrap();
+            }
+            Ok(*item)
+        });
+
+    sched.request(0, Priority::Active, 0);
+    started_rx.recv_timeout(Duration::from_secs(2)).unwrap();
+    sched.request(7, Priority::Background, 10);
+    let report = sched.cancel_id(7);
+    sched.request(7, Priority::Background, 20);
+    release_tx.send(()).unwrap();
+
+    for _ in 0..2 {
+        rx.recv_timeout(Duration::from_secs(2)).unwrap();
+    }
+    let completions = sched
+        .drain()
+        .into_iter()
+        .filter_map(|c| c.result.ok().map(|out| (c.id, out)))
+        .filter(|(id, _)| *id == 7)
+        .collect();
+
+    ResubmissionOutcome {
+        report,
+        completions,
+    }
+}
+
+fn resubmit_cancelled_in_flight_id_on_real_scheduler() -> ResubmissionOutcome {
+    let (tx, rx) = mpsc::channel();
+    let (started_tx, started_rx) = mpsc::channel();
+    let (release_tx, release_rx) = mpsc::channel();
+    let release_rx = Arc::new(Mutex::new(release_rx));
+    let mut sched: Scheduler<i32, i32> =
+        Scheduler::new(NonZeroUsize::new(1).unwrap(), tx, move |item: &i32| {
+            if *item == 10 {
+                started_tx.send(()).unwrap();
+                release_rx
+                    .lock()
+                    .unwrap()
+                    .recv_timeout(Duration::from_secs(2))
+                    .unwrap();
+            }
+            Ok(*item)
+        });
+
+    sched.request(7, Priority::Active, 10);
+    started_rx.recv_timeout(Duration::from_secs(2)).unwrap();
+    let report = sched.cancel_id(7);
+    release_tx.send(()).unwrap();
+    rx.recv_timeout(Duration::from_secs(2)).unwrap();
+    assert!(sched.drain().is_empty());
+
+    sched.request(7, Priority::Active, 20);
+    rx.recv_timeout(Duration::from_secs(2)).unwrap();
+    let completions = sched
+        .drain()
+        .into_iter()
+        .filter_map(|c| c.result.ok().map(|out| (c.id, out)))
+        .collect();
+
+    ResubmissionOutcome {
+        report,
+        completions,
+    }
+}
+
+#[test]
 fn cancel_group_matches() {
     let mut det: DeterministicScheduler<i32, i32> = DeterministicScheduler::new(|item| Ok(*item));
     det.request_scoped(
