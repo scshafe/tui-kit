@@ -231,19 +231,25 @@ impl FocusManager {
     }
 }
 
-fn validate_scope(scope: &FocusScope, path: &'static str) -> Result<(), ConfigError> {
+fn validate_scope(scope: &FocusScope, path: &str) -> Result<(), ConfigError> {
     if scope.id.as_str().trim().is_empty() {
-        return Err(ConfigError::new(path, "focus scope IDs must not be empty"));
+        return Err(ConfigError::new(
+            format!("{path}.id"),
+            "focus scope IDs must not be empty",
+        ));
     }
-    for node in &scope.nodes {
+    for (index, node) in scope.nodes.iter().enumerate() {
         if node.id.as_str().trim().is_empty() {
-            return Err(ConfigError::new(path, "focus node IDs must not be empty"));
+            return Err(ConfigError::new(
+                format!("{path}.nodes[{index}].id"),
+                "focus node IDs must not be empty",
+            ));
         }
     }
     for (index, node) in scope.nodes.iter().enumerate() {
         if scope.nodes[..index].iter().any(|seen| seen.id == node.id) {
             return Err(ConfigError::new(
-                path,
+                format!("{path}.nodes[{index}].id"),
                 format!("duplicate focus node ID `{}`", node.id),
             ));
         }
@@ -278,7 +284,21 @@ mod tests {
     #[test]
     fn validation_rejects_duplicate_nodes() {
         let error = FocusManager::new(FocusConfig::explicit(), nodes(&["dup", "dup"])).unwrap_err();
-        assert_eq!(error.path, "focus.root");
+        assert_eq!(error.path, "focus.root.nodes[1].id");
         assert!(error.reason.contains("duplicate"));
+    }
+
+    #[test]
+    fn validation_paths_name_the_invalid_focus_field() {
+        let error = FocusManager::new(FocusConfig::explicit(), nodes(&[""])).unwrap_err();
+        assert_eq!(error.path, "focus.root.nodes[0].id");
+        assert_eq!(error.reason, "focus node IDs must not be empty");
+
+        let mut manager = FocusManager::new(FocusConfig::explicit(), nodes(&["main"])).unwrap();
+        let error = manager
+            .push_scope("", FocusScopeKind::Modal, nodes(&["ok"]))
+            .unwrap_err();
+        assert_eq!(error.path, "focus.scope.id");
+        assert_eq!(error.reason, "focus scope IDs must not be empty");
     }
 }
