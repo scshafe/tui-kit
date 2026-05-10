@@ -23,9 +23,12 @@
 //! lifecycle policy, and workspace state remain outside this module.
 
 use crate::config::{ConfigError, Validate};
-use crate::image::{ImageBackendPreference, ImageSurfaceRegistry};
-use crate::layout::CanvasMetrics;
+use crate::image::{ImageBackendPreference, ImageSurface, ImageSurfaceRegistry};
+use crate::layout::{CanvasMetrics, CellArea, CellOffset};
 use crate::tty::terminal_metrics;
+use crate::widgets::image_viewport::{
+    ImageViewportOptions, ImageViewportPlacement, ImageViewportWidget, ViewportImage,
+};
 use anyhow::Result;
 use ratatui::backend::CrosstermBackend;
 use ratatui::Frame;
@@ -147,6 +150,53 @@ impl Terminal {
 
     pub fn metrics(&self) -> CanvasMetrics {
         terminal_metrics()
+    }
+
+    pub fn render_image_viewport(
+        &mut self,
+        widget: &mut ImageViewportWidget,
+        image_id: u32,
+        placement_id: u32,
+        png: &[u8],
+        target: CellArea,
+    ) -> Result<Option<ImageViewportPlacement>> {
+        let terminal_metrics = self.metrics();
+        widget.update_canvas(CanvasMetrics::new(
+            target.size,
+            terminal_metrics.cell_pixel.or_fallback(),
+        ));
+
+        let Some(placement) = widget.placement()? else {
+            self.images.delete_placement(placement_id)?;
+            return Ok(None);
+        };
+
+        self.images.ensure_loaded(image_id, png)?;
+        let origin = CellOffset {
+            col: target.origin.col.saturating_add(placement.origin.col),
+            row: target.origin.row.saturating_add(placement.origin.row),
+        };
+        self.images
+            .place_at(origin, placement.place_options(image_id, placement_id))?;
+        Ok(Some(placement))
+    }
+
+    pub fn render_viewport_image(
+        &mut self,
+        image: ViewportImage,
+        image_id: u32,
+        placement_id: u32,
+        png: &[u8],
+        target: CellArea,
+        options: ImageViewportOptions,
+    ) -> Result<Option<ImageViewportPlacement>> {
+        let terminal_metrics = self.metrics();
+        let mut widget = ImageViewportWidget::from_image_with_options(
+            image,
+            CanvasMetrics::new(target.size, terminal_metrics.cell_pixel.or_fallback()),
+            options,
+        )?;
+        self.render_image_viewport(&mut widget, image_id, placement_id, png, target)
     }
 }
 

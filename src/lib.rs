@@ -9,7 +9,7 @@
 //! - Slot-aligned, priority-truncated text bars in [`bar`].
 //! - Priority-queue [`scheduler`] for async work.
 //! - File [`watcher`] integration.
-//! - Composed [`widgets`] (dialog) and a [`terminal`] session wrapper.
+//! - Composed [`widgets`] (dialog, image box) and a [`terminal`] session wrapper.
 //!
 //! ## Stability
 //!
@@ -25,6 +25,8 @@
 //! design discipline.
 
 #![warn(missing_debug_implementations)]
+
+pub const BUILD_TIME_HHMM: &str = env!("TUI_KIT_BUILD_TIME_HHMM");
 
 pub mod bar;
 pub mod component;

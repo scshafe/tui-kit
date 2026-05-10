@@ -27,8 +27,8 @@ pub use crate::image::{
 pub use crate::input::Key;
 pub use crate::keymap::{KeyBinding, KeyMap, KeyTrigger, SpecialKey};
 pub use crate::layout::{
-    fit_scale, CanvasMetrics, CellOffset, CellPixel, CellRect, CellRoundingPolicy, CellSize,
-    ClippedSides, ImageAnchorPolicy, ImageOverflowPolicy, ImagePoint, ImageScaleBasis,
+    fit_scale, CanvasMetrics, CellArea, CellOffset, CellPixel, CellRect, CellRoundingPolicy,
+    CellSize, ClippedSides, ImageAnchorPolicy, ImageOverflowPolicy, ImagePoint, ImageScaleBasis,
     ImageZoomLimitPolicy, PixelRect, PixelSize, Placement, PlacementAnchor, PlacementEngine,
     PlacementPolicy, TailViewport, ViewTransform, MAX_SCALE, MIN_SCALE,
 };
@@ -39,3 +39,12 @@ pub use crate::terminal::{Terminal, TerminalConfig};
 pub use crate::tty::{stdin_is_terminal, stdout_is_terminal, terminal_metrics, write_stdout_all};
 pub use crate::watcher::WorkspaceWatcher;
 pub use crate::widgets::dialog::Dialog;
+pub use crate::widgets::image_box::{
+    ImageBox, ImageBoxPlacement, ImageBoxPlan, ImageBoxState, ImageBoxStyle,
+};
+pub use crate::widgets::image_viewport::{
+    CanvasUpdate, ImageScale, ImageViewport, ImageViewportError, ImageViewportInitialScale,
+    ImageViewportOptions, ImageViewportPlacement, ImageViewportWidget, PixelDistance, PixelExtent,
+    ResizePolicy, RgbaImage, ScaleBasis, ScaledPixelOffset, StepDirection, UnscaledPixelOffset,
+    ViewportAxis, ViewportImage, ZoomDirection, ZoomFactor,
+};

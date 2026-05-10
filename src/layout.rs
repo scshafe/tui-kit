@@ -185,6 +185,21 @@ pub struct CellRect {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CellArea {
+    pub origin: CellOffset,
+    pub size: CellSize,
+}
+
+impl CellArea {
+    pub const fn new(col: u16, row: u16, cols: u16, rows: u16) -> Self {
+        Self {
+            origin: CellOffset { col, row },
+            size: CellSize { cols, rows },
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CellOffset {
     pub col: u16,
     pub row: u16,
@@ -383,6 +398,73 @@ impl PlacementEngine {
     ) -> Placement {
         place_with_policy(image, canvas, transform, &self.policy)
     }
+
+    pub fn policy(&self) -> &PlacementPolicy {
+        &self.policy
+    }
+
+    pub fn zoomed_at(
+        &self,
+        transform: ViewTransform,
+        factor: f32,
+        anchor_canvas_x: f32,
+        anchor_canvas_y: f32,
+        image: PixelSize,
+        canvas: CanvasMetrics,
+    ) -> ViewTransform {
+        let new_scale = clamp_scale(transform.scale * factor);
+        if (new_scale - transform.scale).abs() < f32::EPSILON {
+            return transform;
+        }
+        let anchor_image =
+            self.canvas_to_image(transform, anchor_canvas_x, anchor_canvas_y, image, canvas);
+        let pivoted = ViewTransform {
+            scale: new_scale,
+            center_x: transform.center_x,
+            center_y: transform.center_y,
+        };
+        recenter_so_anchor_stays(
+            self,
+            pivoted,
+            anchor_image,
+            anchor_canvas_x,
+            anchor_canvas_y,
+            image,
+            canvas,
+        )
+    }
+
+    pub fn panned(
+        &self,
+        transform: ViewTransform,
+        dx_canvas_fraction: f32,
+        dy_canvas_fraction: f32,
+        image: PixelSize,
+        canvas: CanvasMetrics,
+    ) -> ViewTransform {
+        let placement = self.place(image, canvas, transform);
+        let dx_image_pixels = dx_canvas_fraction * placement.source.width as f32;
+        let dy_image_pixels = dy_canvas_fraction * placement.source.height as f32;
+        let dx_fraction = dx_image_pixels / image.width.max(1) as f32;
+        let dy_fraction = dy_image_pixels / image.height.max(1) as f32;
+        ViewTransform {
+            scale: transform.scale,
+            center_x: (transform.center_x + dx_fraction).clamp(0.0, 1.0),
+            center_y: (transform.center_y + dy_fraction).clamp(0.0, 1.0),
+        }
+    }
+
+    pub fn canvas_to_image(
+        &self,
+        transform: ViewTransform,
+        canvas_x: f32,
+        canvas_y: f32,
+        image: PixelSize,
+        canvas: CanvasMetrics,
+    ) -> ImagePoint {
+        let placement = self.place(image, canvas, transform);
+        canvas_to_image_with_placement(placement, canvas_x, canvas_y, canvas)
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -428,23 +510,16 @@ impl ViewTransform {
         image: PixelSize,
         canvas: CanvasMetrics,
     ) -> Self {
-        let new_scale = clamp_scale(self.scale * factor);
-        if (new_scale - self.scale).abs() < f32::EPSILON {
-            return self;
-        }
-        let anchor_image = self.canvas_to_image(anchor_canvas_x, anchor_canvas_y, image, canvas);
-        let pivoted = Self {
-            scale: new_scale,
-            center_x: self.center_x,
-            center_y: self.center_y,
-        };
-        pivoted.recenter_so_anchor_stays(
-            anchor_image,
-            anchor_canvas_x,
-            anchor_canvas_y,
-            image,
-            canvas,
-        )
+        PlacementEngine::new(PlacementPolicy::crop_fit_centered())
+            .expect("built-in placement policy is valid")
+            .zoomed_at(
+                self,
+                factor,
+                anchor_canvas_x,
+                anchor_canvas_y,
+                image,
+                canvas,
+            )
     }
 
     pub fn panned(
@@ -454,16 +529,9 @@ impl ViewTransform {
         image: PixelSize,
         canvas: CanvasMetrics,
     ) -> Self {
-        let placement = self.place(image, canvas);
-        let dx_image_pixels = dx_canvas_fraction * placement.source.width as f32;
-        let dy_image_pixels = dy_canvas_fraction * placement.source.height as f32;
-        let dx_fraction = dx_image_pixels / image.width.max(1) as f32;
-        let dy_fraction = dy_image_pixels / image.height.max(1) as f32;
-        Self {
-            scale: self.scale,
-            center_x: (self.center_x + dx_fraction).clamp(0.0, 1.0),
-            center_y: (self.center_y + dy_fraction).clamp(0.0, 1.0),
-        }
+        PlacementEngine::new(PlacementPolicy::crop_fit_centered())
+            .expect("built-in placement policy is valid")
+            .panned(self, dx_canvas_fraction, dy_canvas_fraction, image, canvas)
     }
 
     pub fn canvas_to_image(
@@ -473,66 +541,77 @@ impl ViewTransform {
         image: PixelSize,
         canvas: CanvasMetrics,
     ) -> ImagePoint {
-        let placement = self.place(image, canvas);
-        let cell_pixel = canvas.cell_pixel.or_fallback();
-        let canvas_x = canvas_x.clamp(0.0, 1.0);
-        let canvas_y = canvas_y.clamp(0.0, 1.0);
-        let canvas_pixels = canvas.pixels();
-        let cursor_pixel_x = canvas_x * canvas_pixels.width as f32;
-        let cursor_pixel_y = canvas_y * canvas_pixels.height as f32;
-        let origin_pixel_x = f32::from(placement.origin.col) * f32::from(cell_pixel.width);
-        let origin_pixel_y = f32::from(placement.origin.row) * f32::from(cell_pixel.height);
-        let target_pixel_w = f32::from(placement.size.cols) * f32::from(cell_pixel.width);
-        let target_pixel_h = f32::from(placement.size.rows) * f32::from(cell_pixel.height);
-        let local_x = (cursor_pixel_x - origin_pixel_x) / target_pixel_w.max(1.0);
-        let local_y = (cursor_pixel_y - origin_pixel_y) / target_pixel_h.max(1.0);
-        let inside = (0.0..=1.0).contains(&local_x) && (0.0..=1.0).contains(&local_y);
-        let local_x = local_x.clamp(0.0, 1.0);
-        let local_y = local_y.clamp(0.0, 1.0);
-        ImagePoint {
-            x: placement.source.x as f32 + local_x * placement.source.width as f32,
-            y: placement.source.y as f32 + local_y * placement.source.height as f32,
-            inside,
-        }
+        PlacementEngine::new(PlacementPolicy::crop_fit_centered())
+            .expect("built-in placement policy is valid")
+            .canvas_to_image(self, canvas_x, canvas_y, image, canvas)
     }
+}
 
-    fn recenter_so_anchor_stays(
-        self,
-        anchor_image: ImagePoint,
-        anchor_canvas_x: f32,
-        anchor_canvas_y: f32,
-        image: PixelSize,
-        canvas: CanvasMetrics,
-    ) -> Self {
-        let placement_at_new_scale = Self {
-            scale: self.scale,
+fn canvas_to_image_with_placement(
+    placement: Placement,
+    canvas_x: f32,
+    canvas_y: f32,
+    canvas: CanvasMetrics,
+) -> ImagePoint {
+    let cell_pixel = canvas.cell_pixel.or_fallback();
+    let canvas_x = canvas_x.clamp(0.0, 1.0);
+    let canvas_y = canvas_y.clamp(0.0, 1.0);
+    let canvas_pixels = canvas.pixels();
+    let cursor_pixel_x = canvas_x * canvas_pixels.width as f32;
+    let cursor_pixel_y = canvas_y * canvas_pixels.height as f32;
+    let origin_pixel_x = f32::from(placement.origin.col) * f32::from(cell_pixel.width);
+    let origin_pixel_y = f32::from(placement.origin.row) * f32::from(cell_pixel.height);
+    let target_pixel_w = f32::from(placement.size.cols) * f32::from(cell_pixel.width);
+    let target_pixel_h = f32::from(placement.size.rows) * f32::from(cell_pixel.height);
+    let local_x = (cursor_pixel_x - origin_pixel_x) / target_pixel_w.max(1.0);
+    let local_y = (cursor_pixel_y - origin_pixel_y) / target_pixel_h.max(1.0);
+    let inside = (0.0..=1.0).contains(&local_x) && (0.0..=1.0).contains(&local_y);
+    let local_x = local_x.clamp(0.0, 1.0);
+    let local_y = local_y.clamp(0.0, 1.0);
+    ImagePoint {
+        x: placement.source.x as f32 + local_x * placement.source.width as f32,
+        y: placement.source.y as f32 + local_y * placement.source.height as f32,
+        inside,
+    }
+}
+
+fn recenter_so_anchor_stays(
+    engine: &PlacementEngine,
+    transform: ViewTransform,
+    anchor_image: ImagePoint,
+    anchor_canvas_x: f32,
+    anchor_canvas_y: f32,
+    image: PixelSize,
+    canvas: CanvasMetrics,
+) -> ViewTransform {
+    let placement_at_new_scale = engine.place(
+        image,
+        canvas,
+        ViewTransform {
+            scale: transform.scale,
             center_x: anchor_image.x / image.width.max(1) as f32,
             center_y: anchor_image.y / image.height.max(1) as f32,
-        }
-        .place(image, canvas);
-        let cell_pixel = canvas.cell_pixel.or_fallback();
-        let canvas_pixels = canvas.pixels();
-        let anchor_pixel_x = anchor_canvas_x.clamp(0.0, 1.0) * canvas_pixels.width as f32;
-        let anchor_pixel_y = anchor_canvas_y.clamp(0.0, 1.0) * canvas_pixels.height as f32;
-        let origin_pixel_x =
-            f32::from(placement_at_new_scale.origin.col) * f32::from(cell_pixel.width);
-        let origin_pixel_y =
-            f32::from(placement_at_new_scale.origin.row) * f32::from(cell_pixel.height);
-        let target_pixel_w =
-            f32::from(placement_at_new_scale.size.cols) * f32::from(cell_pixel.width);
-        let target_pixel_h =
-            f32::from(placement_at_new_scale.size.rows) * f32::from(cell_pixel.height);
-        let local_x = ((anchor_pixel_x - origin_pixel_x) / target_pixel_w.max(1.0)).clamp(0.0, 1.0);
-        let local_y = ((anchor_pixel_y - origin_pixel_y) / target_pixel_h.max(1.0)).clamp(0.0, 1.0);
-        let center_image_x =
-            anchor_image.x - (local_x - 0.5) * placement_at_new_scale.source.width as f32;
-        let center_image_y =
-            anchor_image.y - (local_y - 0.5) * placement_at_new_scale.source.height as f32;
-        Self {
-            scale: self.scale,
-            center_x: (center_image_x / image.width.max(1) as f32).clamp(0.0, 1.0),
-            center_y: (center_image_y / image.height.max(1) as f32).clamp(0.0, 1.0),
-        }
+        },
+    );
+    let cell_pixel = canvas.cell_pixel.or_fallback();
+    let canvas_pixels = canvas.pixels();
+    let anchor_pixel_x = anchor_canvas_x.clamp(0.0, 1.0) * canvas_pixels.width as f32;
+    let anchor_pixel_y = anchor_canvas_y.clamp(0.0, 1.0) * canvas_pixels.height as f32;
+    let origin_pixel_x = f32::from(placement_at_new_scale.origin.col) * f32::from(cell_pixel.width);
+    let origin_pixel_y =
+        f32::from(placement_at_new_scale.origin.row) * f32::from(cell_pixel.height);
+    let target_pixel_w = f32::from(placement_at_new_scale.size.cols) * f32::from(cell_pixel.width);
+    let target_pixel_h = f32::from(placement_at_new_scale.size.rows) * f32::from(cell_pixel.height);
+    let local_x = ((anchor_pixel_x - origin_pixel_x) / target_pixel_w.max(1.0)).clamp(0.0, 1.0);
+    let local_y = ((anchor_pixel_y - origin_pixel_y) / target_pixel_h.max(1.0)).clamp(0.0, 1.0);
+    let center_image_x =
+        anchor_image.x - (local_x - 0.5) * placement_at_new_scale.source.width as f32;
+    let center_image_y =
+        anchor_image.y - (local_y - 0.5) * placement_at_new_scale.source.height as f32;
+    ViewTransform {
+        scale: transform.scale,
+        center_x: (center_image_x / image.width.max(1) as f32).clamp(0.0, 1.0),
+        center_y: (center_image_y / image.height.max(1) as f32).clamp(0.0, 1.0),
     }
 }
 

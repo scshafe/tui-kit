@@ -25,7 +25,7 @@
 //! the same lifecycle.
 
 use crate::config::{ConfigError, Validate};
-use crate::layout::{PixelRect, PixelSize};
+use crate::layout::{CellOffset, PixelRect, PixelSize};
 use crate::tty::write_stdout_all;
 use anyhow::Result;
 use base64::Engine;
@@ -138,6 +138,13 @@ impl ImageSurfaceRegistry {
             self.delete_placement(id)?;
         }
         Ok(())
+    }
+
+    pub fn place_at(&mut self, origin: CellOffset, opts: PlaceOptions) -> Result<()> {
+        match &mut self.surface {
+            SelectedImageSurface::Kitty(surface) => surface.place_at(origin, opts),
+            SelectedImageSurface::Noop(surface) => surface.place(opts),
+        }
     }
 
     /// Drop-time cleanup for image data owned by the selected protocol.
@@ -371,6 +378,11 @@ impl KittyImageRegistry {
         Ok(())
     }
 
+    pub fn place_at(&mut self, origin: CellOffset, opts: PlaceOptions) -> Result<()> {
+        position_cursor(origin)?;
+        self.place(opts)
+    }
+
     /// Drop-time cleanup. Emits a global delete-all-with-data so we leave
     /// the terminal in a clean state. Don't call mid-session — use
     /// [`ImageSurface::forget_all`] if you want to reset images cleanly.
@@ -394,6 +406,9 @@ impl ImageSurface for KittyImageRegistry {
     }
 
     fn place(&mut self, opts: PlaceOptions) -> Result<()> {
+        if self.placements.contains(&opts.placement_id) {
+            self.delete_placement(opts.placement_id)?;
+        }
         write!(
             io::stdout().lock(),
             "\x1b_Ga=p,i={i},p={p},q=2,X={x},Y={y},W={w},H={h},c={c},r={r};\x1b\\",
@@ -442,6 +457,16 @@ impl ImageSurface for KittyImageRegistry {
         io::stdout().flush()?;
         Ok(())
     }
+}
+
+fn position_cursor(origin: CellOffset) -> Result<()> {
+    write!(
+        io::stdout().lock(),
+        "\x1b[{};{}H",
+        origin.row.saturating_add(1).max(1),
+        origin.col.saturating_add(1).max(1)
+    )?;
+    Ok(())
 }
 
 fn transmit_png(image_id: u32, png: &[u8]) -> Result<()> {

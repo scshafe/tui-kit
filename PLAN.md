@@ -64,8 +64,8 @@ The crate already provides:
 - `bar`: slot-aligned status bar registry.
 - `scheduler`: thread-backed priority scheduler with dedupe, epoch invalidation, progress, completions.
 - `watcher`: notify/debounce producer.
-- `widgets::picker`: generic item picker with filtering, groups, thumbnails.
 - `widgets::dialog`: modal dialog.
+- `widgets::image_box`: common image viewport over placement/image primitives.
 - `terminal`: raw-mode/alt-screen terminal wrapper with image registry.
 
 The current implementation is useful, but several APIs still contain app-shaped assumptions or under-specified behavior. This plan treats those as design pressure, not as blockers caused by refactor cost.
@@ -189,74 +189,27 @@ Recommendation: implement `KeyMap<PickerAction>` rather than a single `toggle_gr
 - Config validation should error if a key is bound to an action requiring missing config.
 - Existing c4tui-specific group/legend behavior moves into c4tui key/action mapping.
 
-## Milestone 2 — Explicit image placement and zoom policy
+## Milestone 2 — Image Placement and ImageBox
 
 ### Problem
 
-Image zoom behavior is currently encoded in `ViewTransform::place`: fit-scale first, then zoom, crop to canvas when overfit, center in available cells. That is a valid policy, but applications need to choose between at least these behaviors:
+Terminal image rendering has two layers that should stay separate:
 
-- scale image down/up to stay inside a region;
-- allow overflow/cutoff while continuing to zoom unscaled;
-- prevent further zoom once a boundary is reached;
-- crop source versus crop destination;
-- preserve anchor under cursor versus recenter;
-- choose how thumbnails and main images behave differently.
+- low-level placement primitives for applications that need direct control;
+- a streamlined `ImageBox` for the common source/zoom/crop viewport.
+
+The `ImageBox` path should not inherit every low-level placement concern. It needs a smaller model that can be reasoned about directly.
 
 ### Direction
 
-Promote image placement behavior into explicit configuration.
-
-Proposed API:
-
-```rust
-pub enum ImageZoomLimitPolicy {
-    ClampScale { min: f32, max: f32 },
-    ClampAtFitBounds,
-    AllowUnboundedWithinProtocol,
-}
-
-pub enum ImageOverflowPolicy {
-    FitWithinArea,
-    CropSourceToArea,
-    OverflowAndClipDestination,
-    PreventZoomBeyondArea,
-}
-
-pub enum ImageScaleBasis {
-    NativePixels,
-    FitToArea,
-    FillArea,
-    ExplicitScale(f32),
-}
-
-pub enum ImageAnchorPolicy {
-    Center,
-    PreserveCursorAnchor,
-    PreserveImagePoint { x: f32, y: f32 },
-}
-
-pub struct PlacementPolicy {
-    pub scale_basis: ImageScaleBasis,
-    pub zoom_limit: ImageZoomLimitPolicy,
-    pub overflow: ImageOverflowPolicy,
-    pub anchor: ImageAnchorPolicy,
-    pub min_visible_pixels: PixelSize,
-    pub cell_rounding: CellRoundingPolicy,
-}
-```
-
-`ViewTransform` should become pure state. Placement calculation should be:
-
-```rust
-let placement = PlacementEngine::new(policy).place(image, area, transform, metrics)?;
-```
+`widgets::image_box::ImageBox` should keep its own small model: source dimensions, zoom, offset, theoretical dimensions, and cropped visible dimensions. Applications that need direct placement control can bypass `ImageBox` and continue using `PlacementEngine` and `ImageSurface`.
 
 ### Requirements
 
-- Main views, thumbnails, previews, and charts can use different placement policies.
-- Misconfigured placement policy errors loudly, especially contradictory overflow/zoom constraints.
-- Docs must state invariants for coordinating ratatui cells and terminal image placements.
-- Placement result should expose enough metadata for debugging: effective scale, fit scale, source rect, destination cells, clipped sides, anchor result.
+- `ImageBox` derives theoretical dimensions from source dimensions and zoom.
+- `ImageBox` crops theoretical dimensions by offset and available box pixels.
+- `ImageBoxPlan` exposes theoretical dimensions, visible dimensions, source rect, destination cells, and destination origin.
+- `ImageBoxPlan` keeps terminal image placement as an explicit side effect: render text/border to the ratatui buffer, then place the image through an `ImageSurface`.
 - WezTerm/Kitty behavior is the initial correctness target.
 
 ## Milestone 3 — Image surface system
@@ -649,18 +602,19 @@ Recommended order:
 1. Add strict config/validation primitives and named presets.
 2. Remove hardcoded picker `Tab` behavior via `PickerAction` key map.
 3. Extract image placement policy from `ViewTransform::place` into configurable `PlacementEngine`.
-4. Add `NoopImageSurface` and explicit image backend config for Kitty/disabled modes.
-5. Categorize `AppEvent` while preserving one channel; optionally add generic `UserEvent`.
-6. Add tick producers.
-7. Add scheduler instrumentation and cancellation by ID/group/source/namespace.
-8. Add scrollable list and table widgets.
-9. Add mock terminal/image/scheduler test harness.
-10. Add theme roles and widget style configs.
-11. Add focus manager.
-12. Add component trait and cached rendering.
-13. Add tree/tabs/panes.
-14. Reassess `AppShell` once enough examples repeat the same event-loop structure.
-15. Add Sixel/iTerm2 after Kitty/WezTerm behavior is excellent and the surface abstraction has settled.
+4. Add `ImageBox` as the common source/zoom/crop image viewport on top of placement/image primitives.
+5. Add `NoopImageSurface` and explicit image backend config for Kitty/disabled modes.
+6. Categorize `AppEvent` while preserving one channel; optionally add generic `UserEvent`.
+7. Add tick producers.
+8. Add scheduler instrumentation and cancellation by ID/group/source/namespace.
+9. Add scrollable list and table widgets.
+10. Add mock terminal/image/scheduler test harness.
+11. Add theme roles and widget style configs.
+12. Add focus manager.
+13. Add component trait and cached rendering.
+14. Add tree/tabs/panes.
+15. Reassess `AppShell` once enough examples repeat the same event-loop structure.
+16. Add Sixel/iTerm2 after Kitty/WezTerm behavior is excellent and the surface abstraction has settled.
 
 ## Non-goals for now
 

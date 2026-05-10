@@ -23,8 +23,38 @@ Early. Extracted from [c4tui](https://github.com/scshafe/c4tui) as the reusable 
 | `scheduler` | Priority-queue task scheduler with custom-priority generic, scoped cancellation, machine-readable queue/timing stats | c4tui |
 | `watcher` | notify-based file watcher with debounce, emits `WatcherEvent::WorkspaceChanged` | c4tui |
 | `widgets::dialog` | `Dialog` widget for bordered modal text rendering | c4tui |
+| `widgets::image_box` | `ImageBox`, `ImageBoxState`, and `ImageBoxPlan` — common image viewport: source dimensions, zoom, crop, optional border/title | image-box tests / visual test |
 | `terminal` | `Terminal` wrapping `ratatui::Terminal<CrosstermBackend>` + image registry + raw-mode lifecycle | c4tui |
 | `testkit` | Widget buffer rendering helpers, typed event scripts, mock image surface, `DeterministicScheduler` | tests/parity.rs |
+
+## ImageBox
+
+`ImageBox` is the streamlined image viewport. It keeps source image dimensions, applies zoom to derive theoretical dimensions, then crops the theoretical image to the available box pixels. If the theoretical image is smaller than the box on either axis, it is centered on that axis.
+
+It does not replace the lower-level primitives. Consumers that need direct control can still use the `layout` and `image` modules directly.
+
+```rust
+use tui_kit::prelude::*;
+
+let image = ImageBox::new(image_id, MAIN_PLACEMENT_ID, PixelSize::new(width, height))
+    .border(true)
+    .title("Diagram");
+let mut state = ImageBoxState::default();
+
+let plan = image.plan(area, terminal.metrics(), &state)?;
+terminal.draw(|frame| {
+    plan.render(frame.buffer_mut());
+})?;
+plan.place(terminal.images())?;
+terminal.images().flush()?;
+```
+
+Manual visual test:
+
+```bash
+cd visual-tests
+cargo run --offline
+```
 
 ## Removed pending consumer demand
 
