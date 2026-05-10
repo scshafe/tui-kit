@@ -14,8 +14,8 @@
 //! ## Stability
 //!
 //! All public modules have at least one in-tree consumer, either c4tui or a
-//! crate test. The consumer-gate CI job exercises c4tui against the local
-//! tui-kit on every push.
+//! crate test. The consumer-gate script exercises c4tui against the local
+//! tui-kit checkout and should be run for integration-touching changes.
 //!
 //! Module-level docs flag surfaces that are consumer-driven, deliberately
 //! narrow, or removed pending consumer demand — for example, [`focus`] exposes
