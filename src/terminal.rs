@@ -201,6 +201,19 @@ mod tests {
         .unwrap_err();
 
         assert_eq!(error.path, "terminal.image_backend.order");
+        assert!(error.reason.contains("degraded fallback"));
+    }
+
+    #[test]
+    fn terminal_config_rejects_unimplemented_explicit_protocol_before_entry() {
+        let error = TerminalConfig {
+            image_backend: ImageBackendPreference::Explicit(ImageProtocol::Sixel),
+        }
+        .validate()
+        .unwrap_err();
+
+        assert_eq!(error.path, "terminal.image_backend.protocol");
+        assert!(error.reason.contains("not implemented"));
     }
 
     #[test]

@@ -101,10 +101,7 @@ impl ImageSurfaceRegistry {
             | ImageBackendPreference::Explicit(ImageProtocol::Kitty) => {
                 SelectedImageSurface::Kitty(KittyImageRegistry::default())
             }
-            ImageBackendPreference::Disabled
-            | ImageBackendPreference::Explicit(ImageProtocol::Noop) => {
-                SelectedImageSurface::Noop(NoopImageSurface)
-            }
+            ImageBackendPreference::Disabled => SelectedImageSurface::Noop(NoopImageSurface),
             ImageBackendPreference::Explicit(protocol) => {
                 return Err(unsupported_protocol_error(
                     *protocol,
@@ -229,17 +226,39 @@ fn unsupported_protocol_error(protocol: ImageProtocol, path: &'static str) -> Co
     )
 }
 
+fn explicit_noop_error(path: &'static str) -> ConfigError {
+    ConfigError::new(
+        path,
+        "Noop is a degraded fallback, not a terminal image protocol; use Disabled instead",
+    )
+}
+
+fn image_protocol_is_implemented(protocol: ImageProtocol) -> bool {
+    matches!(protocol, ImageProtocol::Kitty)
+}
+
 impl Validate for ImageBackendPreference {
     fn validate(&self) -> Result<(), ConfigError> {
         match self {
+            Self::Explicit(ImageProtocol::Noop) => {
+                Err(explicit_noop_error("image.backend.protocol"))
+            }
+            Self::Explicit(protocol) if !image_protocol_is_implemented(*protocol) => Err(
+                unsupported_protocol_error(*protocol, "image.backend.protocol"),
+            ),
             Self::AutoDetect { order } if order.is_empty() => Err(ConfigError::new(
                 "image.backend.order",
                 "auto-detect backend preference requires at least one protocol",
             )),
             Self::AutoDetect { order } if order.contains(&ImageProtocol::Noop) => {
+                Err(explicit_noop_error("image.backend.order"))
+            }
+            Self::AutoDetect { order }
+                if !order.iter().copied().any(image_protocol_is_implemented) =>
+            {
                 Err(ConfigError::new(
                     "image.backend.order",
-                    "Noop is a degraded fallback, not a detectable terminal image protocol",
+                    "auto-detect order contains no implemented terminal image protocol",
                 ))
             }
             _ => Ok(()),
@@ -482,7 +501,31 @@ mod tests {
         .validate()
         .unwrap_err();
 
+        assert_eq!(error.path, "image.backend.order");
         assert!(error.reason.contains("degraded fallback"));
+        assert!(error.reason.contains("use Disabled"));
+    }
+
+    #[test]
+    fn backend_preference_rejects_unimplemented_explicit_protocol() {
+        let error = ImageBackendPreference::Explicit(ImageProtocol::Sixel)
+            .validate()
+            .unwrap_err();
+
+        assert_eq!(error.path, "image.backend.protocol");
+        assert!(error.reason.contains("not implemented"));
+    }
+
+    #[test]
+    fn backend_preference_rejects_auto_detect_without_implemented_protocol() {
+        let error = ImageBackendPreference::AutoDetect {
+            order: vec![ImageProtocol::Sixel, ImageProtocol::ITerm2],
+        }
+        .validate()
+        .unwrap_err();
+
+        assert_eq!(error.path, "image.backend.order");
+        assert!(error.reason.contains("no implemented"));
     }
 
     #[test]
