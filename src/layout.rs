@@ -203,6 +203,20 @@ pub struct Placement {
     pub anchor: PlacementAnchor,
 }
 
+impl Placement {
+    /// True when two placements would render visibly the same content. Used
+    /// by consumers (e.g., c4tui's zoom handler) to detect zoom calls that
+    /// produced no observable effect so they can be surfaced with diagnostics
+    /// rather than silently swallowed.
+    pub fn is_visually_equivalent(&self, other: &Self) -> bool {
+        self.source == other.source
+            && self.size == other.size
+            && self.origin == other.origin
+            && (self.effective_scale - other.effective_scale).abs() < f32::EPSILON
+            && self.visible_pixels == other.visible_pixels
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ClippedSides {
     pub left: bool,
