@@ -9,7 +9,10 @@
 //! pass against the real scheduler.
 
 use std::num::NonZeroUsize;
-use std::sync::{mpsc, Arc, Mutex};
+use std::sync::{
+    atomic::{AtomicUsize, Ordering},
+    mpsc, Arc, Mutex,
+};
 use std::time::Duration;
 
 use tui_kit::scheduler::{CancellationReport, Priority, RequestScope, Scheduler};
@@ -62,6 +65,47 @@ fn dedup_by_id_matches() {
     det.run_all();
     det.request(1, Priority::Active, 3); // also ignored — already completed
     assert_eq!(det.queued_len(), 0);
+}
+
+#[test]
+fn failed_id_resubmission_matches() {
+    let mut attempts = 0;
+    let mut det: DeterministicScheduler<i32, i32> = DeterministicScheduler::new(move |item| {
+        attempts += 1;
+        if attempts == 1 {
+            Err(anyhow::anyhow!("boom"))
+        } else {
+            Ok(*item)
+        }
+    });
+    det.request(7, Priority::Active, 10);
+    assert_eq!(det.run_one(), Some(7));
+    assert!(det.drain().pop().unwrap().result.is_err());
+    det.request(7, Priority::Active, 20);
+    assert_eq!(det.run_one(), Some(7));
+    let det_completion = det.drain().pop().unwrap();
+    assert_eq!(det_completion.id, 7);
+    assert_eq!(*det_completion.result.as_ref().unwrap(), 20);
+
+    let (tx, rx) = mpsc::channel();
+    let attempts = Arc::new(AtomicUsize::new(0));
+    let attempts_for_executor = attempts.clone();
+    let mut real: Scheduler<i32, i32> =
+        Scheduler::new(NonZeroUsize::new(1).unwrap(), tx, move |item: &i32| {
+            if attempts_for_executor.fetch_add(1, Ordering::SeqCst) == 0 {
+                Err(anyhow::anyhow!("boom"))
+            } else {
+                Ok(*item)
+            }
+        });
+    real.request(7, Priority::Active, 10);
+    rx.recv_timeout(Duration::from_secs(2)).unwrap();
+    assert!(real.drain().pop().unwrap().result.is_err());
+    real.request(7, Priority::Active, 20);
+    rx.recv_timeout(Duration::from_secs(2)).unwrap();
+    let real_completion = real.drain().pop().unwrap();
+    assert_eq!(real_completion.id, 7);
+    assert_eq!(*real_completion.result.as_ref().unwrap(), 20);
 }
 
 #[test]

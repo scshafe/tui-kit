@@ -189,6 +189,7 @@ pub struct DeterministicScheduler<Item, Out, P: Ord + Clone = Priority> {
     queued: HashSet<u64>,
     in_flight: Option<TestScheduledRequest<Item, P>>,
     completed: HashSet<u64>,
+    failed: HashSet<u64>,
     cancelled_ids: HashSet<u64>,
     cancelled_total: usize,
     completions: VecDeque<Completion<Out>>,
@@ -206,6 +207,7 @@ impl<Item, Out, P: Ord + Clone> std::fmt::Debug for DeterministicScheduler<Item,
             .field("queued", &self.queue.len())
             .field("in_flight", &self.in_flight.is_some())
             .field("completed", &self.completed.len())
+            .field("failed", &self.failed.len())
             .field("completions", &self.completions.len())
             .field("cancelled_total", &self.cancelled_total)
             .finish_non_exhaustive()
@@ -222,6 +224,7 @@ impl<Item, Out, P: Ord + Clone> DeterministicScheduler<Item, Out, P> {
             queued: HashSet::new(),
             in_flight: None,
             completed: HashSet::new(),
+            failed: HashSet::new(),
             cancelled_ids: HashSet::new(),
             cancelled_total: 0,
             completions: VecDeque::new(),
@@ -311,6 +314,7 @@ impl<Item, Out, P: Ord + Clone> DeterministicScheduler<Item, Out, P> {
         self.queue.clear();
         self.queued.clear();
         self.completed.clear();
+        self.failed.clear();
         self.completions.clear();
         self.cancelled_total += queued + usize::from(in_flight);
     }
@@ -364,7 +368,11 @@ impl<Item, Out, P: Ord + Clone> DeterministicScheduler<Item, Out, P> {
             && request.namespace_epoch == current_namespace_epoch
             && !self.cancelled_ids.remove(&id)
         {
-            self.completed.insert(id);
+            if result.is_ok() {
+                self.completed.insert(id);
+            } else {
+                self.failed.insert(id);
+            }
             self.completions.push_back(Completion { id, result });
             Some(id)
         } else {
