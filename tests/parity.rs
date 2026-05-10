@@ -520,9 +520,80 @@ fn in_flight_epoch_invalidation_report_and_completion_drop_match() {
     assert!(real.completions.is_empty());
 }
 
+#[test]
+fn repeated_in_flight_cancellation_is_counted_once_in_both() {
+    let mut det: DeterministicScheduler<i32, i32> = DeterministicScheduler::new(|item| Ok(*item));
+    det.request_scoped(
+        7,
+        Priority::Active,
+        7,
+        RequestScope::default().group("stale"),
+    );
+    assert_eq!(det.begin_one(), Some(7));
+
+    let first_report = det.cancel_group("stale");
+    let second_report = det.cancel_id(7);
+    assert_eq!(first_report.queued, 0);
+    assert_eq!(first_report.in_flight, 1);
+    assert_eq!(second_report.queued, 0);
+    assert_eq!(second_report.in_flight, 0);
+    assert_eq!(det.cancelled_total(), 1);
+    assert_eq!(det.finish_in_flight(), None);
+    assert!(det.drain().is_empty());
+
+    let real = repeated_in_flight_cancellation_on_real_scheduler();
+    assert_eq!(real.first_report, first_report);
+    assert_eq!(real.second_report, second_report);
+    assert_eq!(real.cancelled_total, det.cancelled_total());
+    assert!(real.completions.is_empty());
+}
+
 struct InFlightCancelOutcome {
     report: CancellationReport,
     completions: Vec<u64>,
+}
+
+struct RepeatedInFlightCancelOutcome {
+    first_report: CancellationReport,
+    second_report: CancellationReport,
+    cancelled_total: usize,
+    completions: Vec<u64>,
+}
+
+fn repeated_in_flight_cancellation_on_real_scheduler() -> RepeatedInFlightCancelOutcome {
+    let (tx, rx) = mpsc::channel();
+    let (started_tx, started_rx) = mpsc::channel();
+    let (release_tx, release_rx) = mpsc::channel();
+    let release_rx = Arc::new(Mutex::new(release_rx));
+    let mut sched: Scheduler<i32, i32> =
+        Scheduler::new(NonZeroUsize::new(1).unwrap(), tx, move |item: &i32| {
+            started_tx.send(()).unwrap();
+            release_rx
+                .lock()
+                .unwrap()
+                .recv_timeout(Duration::from_secs(2))
+                .unwrap();
+            Ok(*item)
+        });
+
+    sched.request_scoped(
+        7,
+        Priority::Active,
+        7,
+        RequestScope::default().group("stale"),
+    );
+    started_rx.recv_timeout(Duration::from_secs(2)).unwrap();
+    let first_report = sched.cancel_group("stale");
+    let second_report = sched.cancel_id(7);
+    release_tx.send(()).unwrap();
+    rx.recv_timeout(Duration::from_secs(2)).unwrap();
+
+    RepeatedInFlightCancelOutcome {
+        first_report,
+        second_report,
+        cancelled_total: sched.stats().cancelled_total,
+        completions: sched.drain().into_iter().map(|c| c.id).collect(),
+    }
 }
 
 fn cancel_in_flight_on_real_scheduler(
