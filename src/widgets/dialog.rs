@@ -3,6 +3,10 @@
 //! [`Dialog`] renders title, message, and footer text. Confirmation,
 //! cancellation, focus routing, and command meaning stay in applications until
 //! a real consumer asks tui-kit to own reusable modal state.
+//!
+//! **Stability:** consumed by c4tui as a presentational widget only. Do not
+//! grow modal state, action enums, or focus policy here without migrating a
+//! named consumer in the same change set.
 
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;

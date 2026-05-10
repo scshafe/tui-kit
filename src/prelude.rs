@@ -7,6 +7,10 @@
 //! Test harness helpers stay under [`crate::testkit`] instead of the prelude so
 //! application imports do not accidentally couple runtime code to test-only
 //! surfaces.
+//!
+//! **Stability:** production-consumer convenience surface only. Keep exports
+//! limited to APIs that c4tui or another real application can use at runtime;
+//! test doubles and speculative modules should remain outside the prelude.
 
 pub use crate::bar::{SegmentSlot, StatusFragment};
 pub use crate::component::{

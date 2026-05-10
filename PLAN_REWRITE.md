@@ -10,7 +10,7 @@ A consumer-driven, policy-light middleware where:
 2. **The API floor is explicit**: every public item carries stability metadata; `experimental` is a real, visible status, not "well, we're pre-1.0."
 3. **Config types form one hierarchy** with consistent, non-doubled error paths and a single pattern (`Validate` trait + `ConfigError { path, reason }`) — no two-layer wrappers like `ImageConfig` over `ImageBackendPreference`.
 4. **Test doubles share semantics with the real implementation** — `DeterministicScheduler` and `Scheduler` cancel, prioritize, and report identically; passing against one means passing against the other.
-5. **A consumer gate runs in CI**: tui-kit changes that break c4tui fail the build at the tui-kit PR, not 24 commits later.
+5. **A consumer gate runs before landing**: tui-kit changes that break c4tui fail locally via `scripts/check-c4tui-consumer-gate.sh` and in CI once the workflow patch for c4tui's git dependency can be pushed.
 6. **`PLAN.md` and `README.md` describe the actual crate**, including which surfaces are experimental and what each module's consumer is.
 
 ## Phase 1 — Demolition
@@ -80,7 +80,7 @@ Cut modules come back only when:
 ## Phase 5 — Reinforcement
 
 - **Stability annotations** on every `pub` item at module level.
-- **Consumer gate in CI**: cargo fmt/clippy/test/doc plus c4tui `cargo check` against local tui-kit.
+- **Consumer gate before landing**: cargo fmt/clippy/test/doc plus c4tui `cargo check`/`cargo test` against local tui-kit. The local script is authoritative until the workflow can patch c4tui's git dependency to the checked-out tui-kit.
 - **Single-PR rule for breaking changes**.
 - **`pub use` discipline**: prelude exports only production consumer surface; testkit helpers are no longer re-exported from the prelude.
 - **Property-test the test harness**: `tests/parity.rs` submits same workload to `Scheduler` and `DeterministicScheduler`.

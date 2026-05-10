@@ -15,7 +15,8 @@
 //!
 //! All public modules have at least one in-tree consumer, either c4tui or a
 //! crate test. The consumer-gate script exercises c4tui against the local
-//! tui-kit checkout and should be run for integration-touching changes.
+//! tui-kit checkout and is the authoritative integration check until the
+//! GitHub workflow can patch c4tui's git dependency to the checked-out crate.
 //!
 //! Module-level docs flag surfaces that are consumer-driven, deliberately
 //! narrow, or removed pending consumer demand — for example, [`focus`] exposes

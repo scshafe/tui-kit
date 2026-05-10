@@ -4,7 +4,7 @@ Opinionated middleware for building terminal UI applications. Sits on top of [`r
 
 ## Status
 
-Early. Extracted from [c4tui](https://github.com/scshafe/c4tui) as the reusable substrate. The API floor is what c4tui consumes; the consumer gate must prove changes against c4tui. Run `scripts/check-c4tui-consumer-gate.sh` locally when touching shared integration points. See `PLAN_REWRITE.md` for the design discipline.
+Early. Extracted from [c4tui](https://github.com/scshafe/c4tui) as the reusable substrate. The API floor is what c4tui consumes; the consumer gate must prove changes against c4tui. Run `scripts/check-c4tui-consumer-gate.sh` locally when touching shared integration points; until the GitHub workflow patch for c4tui's git dependency lands, that local gate is the authoritative check for unpublished tui-kit changes. See `PLAN_REWRITE.md` for the design discipline.
 
 ## What's in the box
 
