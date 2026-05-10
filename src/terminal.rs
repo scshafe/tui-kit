@@ -5,7 +5,9 @@
 //! The expected usage:
 //!
 //! ```ignore
-//! let mut terminal = tui_kit::terminal::Terminal::enter()?;
+//! use tui_kit::terminal::{Terminal, TerminalConfig};
+//!
+//! let mut terminal = Terminal::enter_with_config(TerminalConfig::strict_wezterm_kitty())?;
 //! terminal.draw(|frame| {
 //!     // build widgets here
 //! })?;

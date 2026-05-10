@@ -2,13 +2,15 @@
 
 //! Pixel/cell layout math for image-heavy terminal UIs.
 //!
-//! This module owns deterministic fit, zoom, pan, clipping, and placement
-//! calculations while leaving product policy (which image to show, when to
-//! zoom, which controls map to pan) in applications.
+//! This module owns deterministic fit, zoom, pan, clipping, placement, and
+//! tail-following viewport calculations while leaving product policy (which
+//! image to show, when to zoom, which controls map to pan, how log rows render)
+//! in applications.
 //!
-//! **Stability:** consumed by c4tui's image canvas and placement code. The
-//! explicit placement policy enums are retained because c4tui needs precise
-//! WezTerm/Kitty image behavior; new policy axes should be driven by concrete
+//! **Stability:** consumed by c4tui's image canvas, placement code, and in-app
+//! log viewer. The explicit placement policy enums and [`TailViewport`] are
+//! retained because c4tui needs precise WezTerm/Kitty image behavior and
+//! reusable tail-scroll math; new policy axes should be driven by concrete
 //! consumer rendering cases.
 
 use crate::config::{ConfigError, Validate};
