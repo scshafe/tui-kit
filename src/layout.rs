@@ -13,6 +13,7 @@
 
 use crate::config::{ConfigError, Validate};
 use serde::{Deserialize, Serialize};
+use std::ops::Range;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PixelSize {
@@ -98,6 +99,72 @@ impl CanvasMetrics {
             u32::from(self.cells.cols) * u32::from(pixel.width),
             u32::from(self.cells.rows) * u32::from(pixel.height),
         )
+    }
+}
+
+/// A deterministic viewport for tail-following collections such as logs.
+///
+/// `scroll_back == 0` means the viewport is pinned to the newest items at the
+/// end of the collection. Larger values move the window toward older items.
+/// tui-kit owns only the math; applications still own item storage, keymaps,
+/// rendering, copy/yank behavior, and product language.
+///
+/// **Stability:** consumed by c4tui's in-app log viewer. Keep this primitive
+/// limited to reusable tail viewport mechanics unless another consumer asks for
+/// richer list-widget behavior.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TailViewport {
+    pub total_items: usize,
+    pub height: usize,
+    pub scroll_back: usize,
+    pub start: usize,
+    pub end: usize,
+    pub can_scroll_up: bool,
+    pub can_scroll_down: bool,
+}
+
+impl TailViewport {
+    pub fn new(total_items: usize, height: usize, scroll_back: usize) -> Self {
+        let height = height.max(1);
+        let max_scroll_back = total_items.saturating_sub(height);
+        let scroll_back = scroll_back.min(max_scroll_back);
+        let end = total_items.saturating_sub(scroll_back);
+        let start = end.saturating_sub(height);
+        Self {
+            total_items,
+            height,
+            scroll_back,
+            start,
+            end,
+            can_scroll_up: start > 0,
+            can_scroll_down: scroll_back > 0,
+        }
+    }
+
+    pub fn visible_range(self) -> Range<usize> {
+        self.start..self.end
+    }
+
+    pub fn max_scroll_back(self) -> usize {
+        self.total_items.saturating_sub(self.height)
+    }
+
+    pub fn scroll_by(self, delta_up: isize) -> usize {
+        if delta_up > 0 {
+            self.scroll_back
+                .saturating_add(delta_up as usize)
+                .min(self.max_scroll_back())
+        } else {
+            self.scroll_back.saturating_sub(delta_up.unsigned_abs())
+        }
+    }
+
+    pub fn scroll_to_top(self) -> usize {
+        self.max_scroll_back()
+    }
+
+    pub const fn scroll_to_bottom() -> usize {
+        0
     }
 }
 
@@ -682,6 +749,37 @@ mod tests {
 
     fn canvas(cols: u16, rows: u16) -> CanvasMetrics {
         CanvasMetrics::new(CellSize::new(cols, rows), CellPixel::new(8, 16))
+    }
+
+    #[test]
+    fn tail_viewport_tracks_newest_items_by_default() {
+        let viewport = TailViewport::new(10, 4, 0);
+
+        assert_eq!(viewport.visible_range(), 6..10);
+        assert_eq!(viewport.scroll_back, 0);
+        assert!(viewport.can_scroll_up);
+        assert!(!viewport.can_scroll_down);
+    }
+
+    #[test]
+    fn tail_viewport_clamps_scrollback_and_zero_height() {
+        let viewport = TailViewport::new(3, 0, 99);
+
+        assert_eq!(viewport.height, 1);
+        assert_eq!(viewport.scroll_back, 2);
+        assert_eq!(viewport.visible_range(), 0..1);
+        assert_eq!(viewport.scroll_to_top(), 2);
+        assert_eq!(TailViewport::scroll_to_bottom(), 0);
+    }
+
+    #[test]
+    fn tail_viewport_scroll_math_is_saturating() {
+        let viewport = TailViewport::new(10, 4, 2);
+
+        assert_eq!(viewport.scroll_by(3), 5);
+        assert_eq!(viewport.scroll_by(99), 6);
+        assert_eq!(viewport.scroll_by(-1), 1);
+        assert_eq!(viewport.scroll_by(-99), 0);
     }
 
     #[test]

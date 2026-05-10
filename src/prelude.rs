@@ -30,7 +30,7 @@ pub use crate::layout::{
     fit_scale, CanvasMetrics, CellOffset, CellPixel, CellRect, CellRoundingPolicy, CellSize,
     ClippedSides, ImageAnchorPolicy, ImageOverflowPolicy, ImagePoint, ImageScaleBasis,
     ImageZoomLimitPolicy, PixelRect, PixelSize, Placement, PlacementAnchor, PlacementEngine,
-    PlacementPolicy, ViewTransform, MAX_SCALE, MIN_SCALE,
+    PlacementPolicy, TailViewport, ViewTransform, MAX_SCALE, MIN_SCALE,
 };
 pub use crate::scheduler::{
     CancellationReport, Completion, Priority, Progress, RequestScope, Scheduler, SchedulerStats,
