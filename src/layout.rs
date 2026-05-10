@@ -257,6 +257,13 @@ pub enum ImageOverflowPolicy {
     /// size and `clipped_sides` reports the overflow. The consumer decides
     /// whether to clamp the cell rect before issuing terminal placements.
     OverflowCellsBeyondArea,
+    /// The visible region preserves the image's aspect ratio at every zoom
+    /// level by letterboxing within the canvas. Unlike `CropSourceToArea`,
+    /// which lets the visible window take the canvas's aspect (so circles in a
+    /// wide source look right but the *shape* of what you see changes with
+    /// zoom), this policy always shows an image-aspect rectangle, growing or
+    /// shrinking it within canvas bounds.
+    LetterboxImageAspect,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
@@ -541,10 +548,36 @@ fn place_with_policy(
         display_w.round().max(1.0).min(u32::MAX as f32) as u32,
         display_h.round().max(1.0).min(u32::MAX as f32) as u32,
     );
-    let max_visible_w = display_w.min(canvas_pixels.width as f32);
-    let max_visible_h = display_h.min(canvas_pixels.height as f32);
-    let visible_w = max_visible_w.max(policy.min_visible_pixels.width as f32);
-    let visible_h = max_visible_h.max(policy.min_visible_pixels.height as f32);
+    let (visible_w, visible_h) =
+        if matches!(policy.overflow, ImageOverflowPolicy::LetterboxImageAspect)
+            && image.width > 0
+            && image.height > 0
+        {
+            // Lock the visible region to the image's aspect ratio. Take the
+            // largest aspect-correct rectangle that fits both within `display`
+            // (so we don't show more than zoom asks for) and within `canvas`
+            // (so we don't overflow the terminal). Letterbox in canvas.
+            let aspect = image.width as f32 / image.height as f32;
+            let max_w = display_w.min(canvas_pixels.width as f32);
+            let max_h = display_h.min(canvas_pixels.height as f32);
+            let mut w = max_w;
+            let mut h = w / aspect;
+            if h > max_h {
+                h = max_h;
+                w = h * aspect;
+            }
+            (
+                w.max(policy.min_visible_pixels.width as f32),
+                h.max(policy.min_visible_pixels.height as f32),
+            )
+        } else {
+            let max_visible_w = display_w.min(canvas_pixels.width as f32);
+            let max_visible_h = display_h.min(canvas_pixels.height as f32);
+            (
+                max_visible_w.max(policy.min_visible_pixels.width as f32),
+                max_visible_h.max(policy.min_visible_pixels.height as f32),
+            )
+        };
     let visible_pixels = PixelSize::new(
         visible_w.round().max(1.0).min(u32::MAX as f32) as u32,
         visible_h.round().max(1.0).min(u32::MAX as f32) as u32,
@@ -554,7 +587,9 @@ fn place_with_policy(
         ImageOverflowPolicy::FitWithinArea
         | ImageOverflowPolicy::OverflowAndClipDestination
         | ImageOverflowPolicy::PreventZoomBeyondArea => (image.width.max(1), image.height.max(1)),
-        ImageOverflowPolicy::CropSourceToArea | ImageOverflowPolicy::OverflowCellsBeyondArea => (
+        ImageOverflowPolicy::CropSourceToArea
+        | ImageOverflowPolicy::OverflowCellsBeyondArea
+        | ImageOverflowPolicy::LetterboxImageAspect => (
             ((visible_w / effective).round() as u32).clamp(1, image.width.max(1)),
             ((visible_h / effective).round() as u32).clamp(1, image.height.max(1)),
         ),
@@ -665,12 +700,14 @@ fn clipped_sides(
     overflow: ImageOverflowPolicy,
 ) -> ClippedSides {
     match overflow {
-        ImageOverflowPolicy::CropSourceToArea => ClippedSides {
-            left: src_x > 0,
-            right: src_x.saturating_add(src_w) < image.width,
-            top: src_y > 0,
-            bottom: src_y.saturating_add(src_h) < image.height,
-        },
+        ImageOverflowPolicy::CropSourceToArea | ImageOverflowPolicy::LetterboxImageAspect => {
+            ClippedSides {
+                left: src_x > 0,
+                right: src_x.saturating_add(src_w) < image.width,
+                top: src_y > 0,
+                bottom: src_y.saturating_add(src_h) < image.height,
+            }
+        }
         ImageOverflowPolicy::OverflowAndClipDestination
         | ImageOverflowPolicy::OverflowCellsBeyondArea => {
             let horizontal = display_w > visible_w || display_w > canvas_pixels.width as f32;
@@ -913,6 +950,36 @@ mod tests {
         assert_eq!(placement.source.height, image.height);
         assert_eq!(placement.clipped_sides, ClippedSides::NONE);
         assert!(!placement.clipped_sides.any());
+    }
+
+    #[test]
+    fn letterbox_image_aspect_preserves_image_aspect_across_zoom() {
+        // Wide image (2:1) in a square canvas (1:1 in pixels). Without
+        // aspect locking the visible region's aspect would change with zoom.
+        let image = PixelSize::new(4000, 2000);
+        let canvas = canvas(100, 50); // 800 x 800 px with default cell pixels
+        let policy = PlacementPolicy {
+            overflow: ImageOverflowPolicy::LetterboxImageAspect,
+            ..PlacementPolicy::crop_fit_centered()
+        };
+        let engine = PlacementEngine::new(policy).unwrap();
+
+        let aspect = |p: &Placement| {
+            let cp = canvas.cell_pixel.or_fallback();
+            let w = p.size.cols as f32 * cp.width as f32;
+            let h = p.size.rows as f32 * cp.height as f32;
+            w / h
+        };
+        let target_aspect = image.width as f32 / image.height as f32;
+
+        for scale in [0.5_f32, 1.0, 2.0, 4.0] {
+            let placement = engine.place(image, canvas, ViewTransform::fit().with_scale(scale));
+            let observed = aspect(&placement);
+            assert!(
+                (observed - target_aspect).abs() / target_aspect < 0.05,
+                "aspect drifted at zoom {scale}: got {observed}, want {target_aspect}"
+            );
+        }
     }
 
     #[test]
