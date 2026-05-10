@@ -31,5 +31,31 @@ EOF_PATCH
 
 cd "${workdir}/c4tui"
 cargo update -p tui-kit
+
+metadata_path="${workdir}/c4tui-metadata.json"
+cargo metadata --format-version 1 > "${metadata_path}"
+python3 - "${metadata_path}" "${repo_root}" <<'PY'
+import json
+import pathlib
+import sys
+
+metadata = json.loads(pathlib.Path(sys.argv[1]).read_text())
+expected = pathlib.Path(sys.argv[2]).resolve()
+packages = [package for package in metadata["packages"] if package["name"] == "tui-kit"]
+if len(packages) != 1:
+    print(f"expected exactly one tui-kit package, found {len(packages)}", file=sys.stderr)
+    sys.exit(1)
+
+package = packages[0]
+actual = pathlib.Path(package["manifest_path"]).parent.resolve()
+if package.get("source") is not None or actual != expected:
+    print(
+        "c4tui is not using the local tui-kit checkout: "
+        f"source={package.get('source')!r}, path={actual}, expected={expected}",
+        file=sys.stderr,
+    )
+    sys.exit(1)
+PY
+
 cargo check --all-targets
 cargo test
