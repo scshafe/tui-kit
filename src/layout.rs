@@ -239,19 +239,19 @@ impl Validate for PlacementPolicy {
     fn validate(&self) -> Result<(), ConfigError> {
         if self.min_visible_pixels.width == 0 || self.min_visible_pixels.height == 0 {
             return Err(ConfigError::new(
-                "PlacementPolicy.min_visible_pixels",
+                "layout.placement_policy.min_visible_pixels",
                 "width and height must both be non-zero",
             ));
         }
         if let ImageScaleBasis::ExplicitScale(scale) = self.scale_basis {
-            validate_positive_finite("PlacementPolicy.scale_basis", scale)?;
+            validate_positive_finite("layout.placement_policy.scale_basis", scale)?;
         }
         if let ImageZoomLimitPolicy::ClampScale { min, max } = self.zoom_limit {
-            validate_positive_finite("PlacementPolicy.zoom_limit.min", min)?;
-            validate_positive_finite("PlacementPolicy.zoom_limit.max", max)?;
+            validate_positive_finite("layout.placement_policy.zoom_limit.min", min)?;
+            validate_positive_finite("layout.placement_policy.zoom_limit.max", max)?;
             if min > max {
                 return Err(ConfigError::new(
-                    "PlacementPolicy.zoom_limit",
+                    "layout.placement_policy.zoom_limit",
                     "min must be less than or equal to max",
                 ));
             }
@@ -259,7 +259,7 @@ impl Validate for PlacementPolicy {
         if let ImageAnchorPolicy::PreserveImagePoint { x, y } = self.anchor {
             if !x.is_finite() || !y.is_finite() {
                 return Err(ConfigError::new(
-                    "PlacementPolicy.anchor",
+                    "layout.placement_policy.anchor",
                     "image point coordinates must be finite",
                 ));
             }
@@ -796,18 +796,43 @@ mod tests {
     }
 
     #[test]
-    fn placement_policy_validation_is_machine_readable() {
-        let policy = PlacementPolicy {
-            scale_basis: ImageScaleBasis::ExplicitScale(f32::NAN),
-            zoom_limit: ImageZoomLimitPolicy::ClampScale { min: 2.0, max: 1.0 },
-            overflow: ImageOverflowPolicy::CropSourceToArea,
-            anchor: ImageAnchorPolicy::Center,
+    fn placement_policy_validation_reports_contract_paths() {
+        let mut policy = PlacementPolicy {
             min_visible_pixels: PixelSize::new(0, 1),
-            cell_rounding: CellRoundingPolicy::Nearest,
+            ..PlacementPolicy::crop_fit_centered()
         };
+        let err = PlacementEngine::new(policy.clone()).unwrap_err();
+        assert_eq!(err.path, "layout.placement_policy.min_visible_pixels");
+        assert!(err.reason.contains("non-zero"));
 
+        policy.min_visible_pixels = PixelSize::new(1, 1);
+        policy.scale_basis = ImageScaleBasis::ExplicitScale(f32::NAN);
+        let err = PlacementEngine::new(policy.clone()).unwrap_err();
+        assert_eq!(err.path, "layout.placement_policy.scale_basis");
+        assert!(err.reason.contains("finite and greater than zero"));
+
+        policy.scale_basis = ImageScaleBasis::FitToArea;
+        policy.zoom_limit = ImageZoomLimitPolicy::ClampScale { min: 2.0, max: 1.0 };
+        let err = PlacementEngine::new(policy.clone()).unwrap_err();
+        assert_eq!(err.path, "layout.placement_policy.zoom_limit");
+        assert!(err.reason.contains("less than or equal"));
+
+        policy.zoom_limit = ImageZoomLimitPolicy::ClampScale {
+            min: 1.0,
+            max: f32::NAN,
+        };
+        let err = PlacementEngine::new(policy.clone()).unwrap_err();
+        assert_eq!(err.path, "layout.placement_policy.zoom_limit.max");
+        assert!(err.reason.contains("finite and greater than zero"));
+
+        policy.zoom_limit = ImageZoomLimitPolicy::ClampScale { min: 1.0, max: 2.0 };
+        policy.anchor = ImageAnchorPolicy::PreserveImagePoint {
+            x: f32::NAN,
+            y: 0.5,
+        };
         let err = PlacementEngine::new(policy).unwrap_err();
-        assert_eq!(err.path, "PlacementPolicy.min_visible_pixels");
+        assert_eq!(err.path, "layout.placement_policy.anchor");
+        assert!(err.reason.contains("finite"));
     }
 
     #[test]
