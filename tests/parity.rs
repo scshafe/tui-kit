@@ -521,6 +521,45 @@ fn in_flight_epoch_invalidation_report_and_completion_drop_match() {
 }
 
 #[test]
+fn cancel_group_reports_queued_and_in_flight_matches() {
+    let mut det: DeterministicScheduler<i32, i32> = DeterministicScheduler::new(|item| Ok(*item));
+    det.request_scoped(
+        7,
+        Priority::Active,
+        7,
+        RequestScope::default().group("stale"),
+    );
+    assert_eq!(det.begin_one(), Some(7));
+    det.request_scoped(
+        8,
+        Priority::Background,
+        8,
+        RequestScope::default().group("stale"),
+    );
+    det.request_scoped(
+        9,
+        Priority::Background,
+        9,
+        RequestScope::default().group("fresh"),
+    );
+
+    let report = det.cancel_group("stale");
+    assert_eq!(report.queued, 1);
+    assert_eq!(report.in_flight, 1);
+    assert_eq!(det.cancelled_total(), 2);
+    assert_eq!(det.run_all(), vec![9]);
+    assert_eq!(
+        det.drain().into_iter().map(|c| c.id).collect::<Vec<_>>(),
+        vec![9]
+    );
+
+    let real = cancel_queued_and_in_flight_group_on_real_scheduler();
+    assert_eq!(real.report, report);
+    assert_eq!(real.cancelled_total, det.cancelled_total());
+    assert_eq!(real.completions, vec![9]);
+}
+
+#[test]
 fn repeated_in_flight_cancellation_is_counted_once_in_both() {
     let mut det: DeterministicScheduler<i32, i32> = DeterministicScheduler::new(|item| Ok(*item));
     det.request_scoped(
@@ -584,6 +623,63 @@ struct RepeatedInFlightCancelOutcome {
     second_report: CancellationReport,
     cancelled_total: usize,
     completions: Vec<u64>,
+}
+
+struct CancelAndContinueOutcome {
+    report: CancellationReport,
+    cancelled_total: usize,
+    completions: Vec<u64>,
+}
+
+fn cancel_queued_and_in_flight_group_on_real_scheduler() -> CancelAndContinueOutcome {
+    let (tx, rx) = mpsc::channel();
+    let (started_tx, started_rx) = mpsc::channel();
+    let (release_tx, release_rx) = mpsc::channel();
+    let release_rx = Arc::new(Mutex::new(release_rx));
+    let mut sched: Scheduler<i32, i32> =
+        Scheduler::new(NonZeroUsize::new(1).unwrap(), tx, move |item: &i32| {
+            if *item == 7 {
+                started_tx.send(()).unwrap();
+                release_rx
+                    .lock()
+                    .unwrap()
+                    .recv_timeout(Duration::from_secs(2))
+                    .unwrap();
+            }
+            Ok(*item)
+        });
+
+    sched.request_scoped(
+        7,
+        Priority::Active,
+        7,
+        RequestScope::default().group("stale"),
+    );
+    started_rx.recv_timeout(Duration::from_secs(2)).unwrap();
+    sched.request_scoped(
+        8,
+        Priority::Background,
+        8,
+        RequestScope::default().group("stale"),
+    );
+    sched.request_scoped(
+        9,
+        Priority::Background,
+        9,
+        RequestScope::default().group("fresh"),
+    );
+
+    let report = sched.cancel_group("stale");
+    release_tx.send(()).unwrap();
+    for _ in 0..2 {
+        rx.recv_timeout(Duration::from_secs(2)).unwrap();
+    }
+
+    CancelAndContinueOutcome {
+        report,
+        cancelled_total: sched.stats().cancelled_total,
+        completions: sched.drain().into_iter().map(|c| c.id).collect(),
+    }
 }
 
 fn repeated_in_flight_cancellation_on_real_scheduler() -> RepeatedInFlightCancelOutcome {
