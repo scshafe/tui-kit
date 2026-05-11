@@ -84,6 +84,7 @@ impl EventScript<Infallible> {
 pub enum MockImageCall {
     EnsureLoaded { image_id: u32, bytes: usize },
     Place(PlaceOptions),
+    DeleteImagePlacement { image_id: u32, placement_id: u32 },
     DeletePlacement { placement_id: u32 },
     DeleteAllPlacements,
     ForgetAll,
@@ -143,6 +144,14 @@ impl ImageSurface for MockImageSurface {
 
     fn place(&mut self, opts: PlaceOptions) -> Result<()> {
         self.calls.push(MockImageCall::Place(opts));
+        Ok(())
+    }
+
+    fn delete_image_placement(&mut self, image_id: u32, placement_id: u32) -> Result<()> {
+        self.calls.push(MockImageCall::DeleteImagePlacement {
+            image_id,
+            placement_id,
+        });
         Ok(())
     }
 
@@ -504,6 +513,7 @@ mod tests {
 
         surface.ensure_loaded(7, b"png").unwrap();
         surface.place(opts).unwrap();
+        surface.delete_image_placement(7, 9).unwrap();
         surface.delete_placement(9).unwrap();
 
         assert_eq!(
@@ -514,7 +524,93 @@ mod tests {
                     bytes: 3
                 },
                 MockImageCall::Place(opts),
+                MockImageCall::DeleteImagePlacement {
+                    image_id: 7,
+                    placement_id: 9
+                },
                 MockImageCall::DeletePlacement { placement_id: 9 }
+            ]
+        );
+    }
+
+    #[test]
+    fn mock_image_surface_records_main_grid_main_lifecycle() {
+        fn opts(image_id: u32, placement_id: u32, cell_cols: u16, cell_rows: u16) -> PlaceOptions {
+            PlaceOptions {
+                image_id,
+                placement_id,
+                source: crate::layout::PixelRect {
+                    x: 0,
+                    y: 0,
+                    width: 16,
+                    height: 9,
+                },
+                cell_cols,
+                cell_rows,
+            }
+        }
+
+        let mut surface = MockImageSurface::default();
+        let main_first = opts(1, crate::image::MAIN_PLACEMENT_ID, 80, 22);
+        let thumb_first = opts(1, crate::image::picker_placement_id(0), 18, 5);
+        let thumb_second = opts(2, crate::image::picker_placement_id(1), 18, 5);
+        let main_second = opts(2, crate::image::MAIN_PLACEMENT_ID, 80, 22);
+
+        surface.ensure_loaded(1, b"main-1").unwrap();
+        surface.place(main_first).unwrap();
+        surface
+            .delete_image_placement(1, crate::image::MAIN_PLACEMENT_ID)
+            .unwrap();
+        surface.ensure_loaded(1, b"main-1").unwrap();
+        surface.place(thumb_first).unwrap();
+        surface.ensure_loaded(2, b"main-2").unwrap();
+        surface.place(thumb_second).unwrap();
+        surface
+            .delete_image_placement(1, crate::image::picker_placement_id(0))
+            .unwrap();
+        surface
+            .delete_image_placement(2, crate::image::picker_placement_id(1))
+            .unwrap();
+        surface.ensure_loaded(2, b"main-2").unwrap();
+        surface.place(main_second).unwrap();
+        surface.forget_all().unwrap();
+
+        assert_eq!(
+            surface.calls(),
+            &[
+                MockImageCall::EnsureLoaded {
+                    image_id: 1,
+                    bytes: 6,
+                },
+                MockImageCall::Place(main_first),
+                MockImageCall::DeleteImagePlacement {
+                    image_id: 1,
+                    placement_id: crate::image::MAIN_PLACEMENT_ID,
+                },
+                MockImageCall::EnsureLoaded {
+                    image_id: 1,
+                    bytes: 6,
+                },
+                MockImageCall::Place(thumb_first),
+                MockImageCall::EnsureLoaded {
+                    image_id: 2,
+                    bytes: 6,
+                },
+                MockImageCall::Place(thumb_second),
+                MockImageCall::DeleteImagePlacement {
+                    image_id: 1,
+                    placement_id: crate::image::picker_placement_id(0),
+                },
+                MockImageCall::DeleteImagePlacement {
+                    image_id: 2,
+                    placement_id: crate::image::picker_placement_id(1),
+                },
+                MockImageCall::EnsureLoaded {
+                    image_id: 2,
+                    bytes: 6,
+                },
+                MockImageCall::Place(main_second),
+                MockImageCall::ForgetAll,
             ]
         );
     }

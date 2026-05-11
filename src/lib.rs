@@ -3,13 +3,14 @@
 //! Sits on top of [`ratatui`] and [`crossterm`]. Provides:
 //! - Unified [`events`] channel + producers (input, watcher, scheduler).
 //! - Declarative [`keymap`] registry.
+//! - Declarative [`elements`] for first-class UI objects, windows, and effects.
 //! - Cell + pixel [`tty`] metrics.
 //! - Image lifecycle surfaces in [`image`].
 //! - Generic placement / fit / pan / zoom math in [`layout`].
 //! - Slot-aligned, priority-truncated text bars in [`bar`].
 //! - Priority-queue [`scheduler`] for async work.
 //! - File [`watcher`] integration.
-//! - Composed [`widgets`] (dialog, image box) and a [`terminal`] session wrapper.
+//! - Composed [`widgets`] (dialog, grid, image box) and a [`terminal`] session wrapper.
 //!
 //! ## Stability
 //!
@@ -31,6 +32,7 @@ pub const BUILD_TIME_HHMM: &str = env!("TUI_KIT_BUILD_TIME_HHMM");
 pub mod bar;
 pub mod component;
 pub mod config;
+pub mod elements;
 pub mod events;
 pub mod focus;
 pub mod image;

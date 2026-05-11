@@ -11,9 +11,10 @@
 //!    terminal once. Idempotent for the same `image_id`.
 //! 2. `place(opts)` — emits a placement at the current cursor position.
 //!    Multiple placements per image (different `placement_id`s) are fine.
-//! 3. `delete_placement(id)` / `delete_placements_in(ids)` — removes
-//!    specific placements. Image data stays loaded so subsequent
-//!    `place()` calls don't need to re-transmit.
+//! 3. `delete_image_placement(image_id, placement_id)` or the tracked
+//!    `delete_placement(id)` / `delete_placements_in(ids)` helpers — remove
+//!    specific placements. Image data stays loaded so subsequent `place()`
+//!    calls don't need to re-transmit.
 //! 4. `forget_all()` — frees both placements and loaded image data.
 //!    Use on workspace reload, not picker-close.
 //! 5. `shutdown()` — emits a global "delete all everything" escape.
@@ -30,7 +31,7 @@ use crate::tty::write_stdout_all;
 use anyhow::Result;
 use base64::Engine;
 use serde::{Deserialize, Serialize};
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::io::{self, Write};
 
 /// A surface that owns the image lifecycle for a particular protocol.
@@ -42,6 +43,9 @@ pub trait ImageSurface {
     fn capabilities(&self) -> ImageCapabilities;
     fn ensure_loaded(&mut self, image_id: u32, png: &[u8]) -> Result<()>;
     fn place(&mut self, opts: PlaceOptions) -> Result<()>;
+    fn delete_image_placement(&mut self, _image_id: u32, placement_id: u32) -> Result<()> {
+        self.delete_placement(placement_id)
+    }
     fn delete_placement(&mut self, placement_id: u32) -> Result<()>;
     fn delete_all_placements(&mut self) -> Result<()>;
     fn forget_all(&mut self) -> Result<()>;
@@ -140,6 +144,20 @@ impl ImageSurfaceRegistry {
         Ok(())
     }
 
+    pub fn delete_image_placement(&mut self, image_id: u32, placement_id: u32) -> Result<()> {
+        ImageSurface::delete_image_placement(self, image_id, placement_id)
+    }
+
+    pub fn delete_image_placements_in<I: IntoIterator<Item = (u32, u32)>>(
+        &mut self,
+        placements: I,
+    ) -> Result<()> {
+        for (image_id, placement_id) in placements {
+            self.delete_image_placement(image_id, placement_id)?;
+        }
+        Ok(())
+    }
+
     pub fn place_at(&mut self, origin: CellOffset, opts: PlaceOptions) -> Result<()> {
         match &mut self.surface {
             SelectedImageSurface::Kitty(surface) => surface.place_at(origin, opts),
@@ -180,6 +198,17 @@ impl ImageSurface for ImageSurfaceRegistry {
         match &mut self.surface {
             SelectedImageSurface::Kitty(surface) => surface.place(opts),
             SelectedImageSurface::Noop(surface) => surface.place(opts),
+        }
+    }
+
+    fn delete_image_placement(&mut self, image_id: u32, placement_id: u32) -> Result<()> {
+        match &mut self.surface {
+            SelectedImageSurface::Kitty(surface) => {
+                surface.delete_image_placement(image_id, placement_id)
+            }
+            SelectedImageSurface::Noop(surface) => {
+                surface.delete_image_placement(image_id, placement_id)
+            }
         }
     }
 
@@ -364,7 +393,7 @@ impl ImageSurface for NoopImageSurface {
 #[derive(Debug, Default)]
 pub struct KittyImageRegistry {
     loaded: HashSet<u32>,
-    placements: HashSet<u32>,
+    placements: HashMap<u32, u32>,
 }
 
 impl KittyImageRegistry {
@@ -406,7 +435,7 @@ impl ImageSurface for KittyImageRegistry {
     }
 
     fn place(&mut self, opts: PlaceOptions) -> Result<()> {
-        if self.placements.contains(&opts.placement_id) {
+        if self.placements.contains_key(&opts.placement_id) {
             self.delete_placement(opts.placement_id)?;
         }
         write!(
@@ -421,23 +450,36 @@ impl ImageSurface for KittyImageRegistry {
             c = opts.cell_cols,
             r = opts.cell_rows,
         )?;
-        self.placements.insert(opts.placement_id);
+        self.placements.insert(opts.placement_id, opts.image_id);
+        Ok(())
+    }
+
+    fn delete_image_placement(&mut self, image_id: u32, placement_id: u32) -> Result<()> {
+        if self.placements.get(&placement_id).copied() == Some(image_id) {
+            self.placements.remove(&placement_id);
+        }
+        write!(
+            io::stdout().lock(),
+            "{}",
+            kitty_delete_placement_escape(image_id, placement_id)
+        )?;
         Ok(())
     }
 
     fn delete_placement(&mut self, placement_id: u32) -> Result<()> {
-        if !self.placements.remove(&placement_id) {
+        let Some(image_id) = self.placements.remove(&placement_id) else {
             return Ok(());
-        }
+        };
         write!(
             io::stdout().lock(),
-            "\x1b_Ga=d,d=p,p={placement_id},q=2;\x1b\\"
+            "{}",
+            kitty_delete_placement_escape(image_id, placement_id)
         )?;
         Ok(())
     }
 
     fn delete_all_placements(&mut self) -> Result<()> {
-        let to_delete: Vec<u32> = self.placements.iter().copied().collect();
+        let to_delete: Vec<u32> = self.placements.keys().copied().collect();
         for id in to_delete {
             self.delete_placement(id)?;
         }
@@ -492,6 +534,10 @@ fn transmit_png(image_id: u32, png: &[u8]) -> Result<()> {
         io::stdout().flush()?;
     }
     Ok(())
+}
+
+fn kitty_delete_placement_escape(image_id: u32, placement_id: u32) -> String {
+    format!("\x1b_Ga=d,d=i,i={image_id},p={placement_id},q=2;\x1b\\")
 }
 
 /// Conventional placement id reserved for an app's main view image.
@@ -639,5 +685,13 @@ mod tests {
         surface.delete_all_placements().unwrap();
         surface.forget_all().unwrap();
         surface.flush().unwrap();
+    }
+
+    #[test]
+    fn kitty_delete_placement_targets_image_placement_pair() {
+        assert_eq!(
+            kitty_delete_placement_escape(7, 9),
+            "\x1b_Ga=d,d=i,i=7,p=9,q=2;\x1b\\"
+        );
     }
 }

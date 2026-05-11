@@ -167,7 +167,7 @@ impl Terminal {
         ));
 
         let Some(placement) = widget.placement()? else {
-            self.images.delete_placement(placement_id)?;
+            self.teardown_image_viewport(image_id, placement_id)?;
             return Ok(None);
         };
 
@@ -197,6 +197,31 @@ impl Terminal {
             options,
         )?;
         self.render_image_viewport(&mut widget, image_id, placement_id, png, target)
+    }
+
+    /// Remove one rendered image viewport placement while keeping its uploaded
+    /// image data cached for future renders.
+    ///
+    /// Kitty identifies a placement by the pair `(image_id, placement_id)`,
+    /// so callers that know both should use this instead of reaching into the
+    /// lower-level image surface.
+    pub fn teardown_image_viewport(&mut self, image_id: u32, placement_id: u32) -> Result<()> {
+        self.images.delete_image_placement(image_id, placement_id)
+    }
+
+    /// Remove several rendered image viewport placements while keeping image
+    /// data cached.
+    pub fn teardown_image_viewports<I>(&mut self, placements: I) -> Result<()>
+    where
+        I: IntoIterator<Item = (u32, u32)>,
+    {
+        self.images.delete_image_placements_in(placements)
+    }
+
+    /// Remove every tracked image viewport placement while keeping image data
+    /// cached.
+    pub fn teardown_all_image_viewports(&mut self) -> Result<()> {
+        self.images.delete_all_placements()
     }
 }
 

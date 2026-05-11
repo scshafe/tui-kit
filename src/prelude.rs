@@ -14,6 +14,13 @@ pub use crate::component::{
     ComponentOutcome, DirtyReason, DirtyState,
 };
 pub use crate::config::{ConfigError, Validate};
+pub use crate::elements::{
+    Bordered, ContainerElement, EffectElement, Element, ElementBorder, ElementExt, ElementOutcome,
+    Focusable, ImageViewportElement, KeyResolution, KeyScope, KeyScopeResolver, KeyScopeRole,
+    Modal, Overlay, Padded, Padding, Panel, ScrollY, Stack, StackConstraint, StackDirection,
+    TerminalEffect, Text, TextOverflow, Window, WindowChrome, WindowFocusScope,
+    WindowLifecycleEvent, WindowRenderStats, WindowRepaintPolicy,
+};
 pub use crate::events::{
     AppEvent, AppEventReceiver, AppEventSender, InputEvent, SchedulerEvent, TerminalEvent,
     WatcherEvent,
@@ -39,6 +46,10 @@ pub use crate::terminal::{Terminal, TerminalConfig};
 pub use crate::tty::{stdin_is_terminal, stdout_is_terminal, terminal_metrics, write_stdout_all};
 pub use crate::watcher::WorkspaceWatcher;
 pub use crate::widgets::dialog::Dialog;
+pub use crate::widgets::grid::{
+    Grid, GridCell, GridCellCanvas, GridCellPlacement, GridInputOutcome, GridNavigation,
+    GridRenderState, GridStyle,
+};
 pub use crate::widgets::image_box::{
     ImageBox, ImageBoxPlacement, ImageBoxPlan, ImageBoxState, ImageBoxStyle,
 };

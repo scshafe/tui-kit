@@ -12,6 +12,7 @@ Early. Extracted from [c4tui](https://github.com/scshafe/c4tui) as the reusable 
 |---|---|---|
 | `events` | Typed `AppEvent<UserEvent>` categories + unified channel: input, terminal, scheduler, watcher, user events | c4tui |
 | `component` | `Component` / `BufferComponent` traits, `ComponentId`, dirty-state invalidation, `Cached<C>` buffer caching | c4tui (`ViewPicker`) |
+| `elements` | First-class buffer-rendered `Element`s, decorators, `Text`, `Panel`, `Window`, `Stack`, overlays, and typed terminal effects | c4tui migration target |
 | `focus` | `FocusManager` with stack-based modal/capturing scopes; `active_scope_id()` for distinguishing modal scopes | c4tui (modal stack) |
 | `input` | `Key` enum mapped from crossterm events | c4tui |
 | `input_thread` | Detached input thread that pushes `InputEvent::Key` and `TerminalEvent::Resize` into the unified channel | c4tui |
@@ -23,9 +24,66 @@ Early. Extracted from [c4tui](https://github.com/scshafe/c4tui) as the reusable 
 | `scheduler` | Priority-queue task scheduler with custom-priority generic, scoped cancellation, machine-readable queue/timing stats | c4tui |
 | `watcher` | notify-based file watcher with debounce, emits `WatcherEvent::WorkspaceChanged` | c4tui |
 | `widgets::dialog` | `Dialog` widget for bordered modal text rendering | c4tui |
+| `widgets::grid` | Selectable/grid collection renderer with local cell canvases, active/selected styling, keyboard navigation, and scroll indicators | c4tui picker migration target |
 | `widgets::image_box` | `ImageBox`, `ImageBoxState`, and `ImageBoxPlan` — common image viewport: source dimensions, zoom, crop, optional border/title | image-box tests / visual test |
 | `terminal` | `Terminal` wrapping `ratatui::Terminal<CrosstermBackend>` + image registry + raw-mode lifecycle | c4tui |
 | `testkit` | Widget buffer rendering helpers, typed event scripts, mock image surface, `DeterministicScheduler` | tests/parity.rs |
+
+## Element composition
+
+Elements render into ratatui buffers. `Panel` is presentational chrome,
+`Window` is the lifecycle/key/effect boundary, `Stack` lays out children, and
+`Grid` is the selectable collection primitive.
+
+```rust
+use ratatui::buffer::Buffer;
+use ratatui::layout::Rect;
+use ratatui::style::Style;
+use tui_kit::prelude::*;
+
+fn render_root(area: Rect) -> anyhow::Result<Buffer> {
+    let body = Text::with_id("body", "Build log ready").wrap(true);
+    let panel = Panel::new("body-panel", body).title("Status").padding(1);
+    let mut window = Window::new("main-window", panel)
+        .with_title("Workspace")
+        .with_padding(1);
+    window.activate();
+
+    let footer = Text::with_id("footer", "q quit  / filter").with_padding((1, 0));
+    let mut root = Stack::vertical("root")
+        .with_child(window, StackConstraint::Fill(1))
+        .with_child(footer, StackConstraint::Length(1));
+
+    let mut buffer = Buffer::empty(area);
+    root.render(area, &mut buffer)?;
+    Ok(buffer)
+}
+
+fn render_picker(area: Rect, buffer: &mut Buffer, items: &[&str], active: Option<usize>) {
+    Grid::new(1)
+        .with_columns(1)
+        .with_active_index(active)
+        .render(area, buffer, items, |cell, canvas| {
+            let marker = if cell.active { "> " } else { "  " };
+            canvas.set_string(0, 0, format!("{marker}{}", cell.item), Style::default());
+        });
+}
+```
+
+Effectful children stay explicit. Use the effect-aware child/layer APIs when a
+container needs to forward terminal side effects:
+
+```rust,ignore
+let mut media = Stack::vertical("media").with_effect_child(image, StackConstraint::Fill(1));
+
+for effect in media.terminal_effects(area)? {
+    effect.apply_to_registry(terminal.images())?;
+}
+
+for effect in media.teardown_effects()? {
+    effect.apply_to_registry(terminal.images())?;
+}
+```
 
 ## ImageBox
 

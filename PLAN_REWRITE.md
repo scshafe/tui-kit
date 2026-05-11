@@ -13,6 +13,69 @@ A consumer-driven, policy-light middleware where:
 5. **A consumer gate runs in CI**: tui-kit changes that break c4tui fail the build at the tui-kit PR, not 24 commits later.
 6. **`PLAN.md` and `README.md` describe the actual crate**, including which surfaces are experimental and what each module's consumer is.
 
+## Current component-system follow-up
+
+The new element/window/grid layer is now the active rollout area. Keep c4tui
+out of the critical path until the library primitives are better flushed out;
+return to c4tui after the local semantics below are tested and documented.
+
+**Deferred note:** `WindowRepaintPolicy` is not urgent right now. The current
+`Whole` and `ChildCached` tests are enough for the moment; deeper repaint-region
+and cache-invalidation semantics should be revisited later as a focused pass.
+
+**Now: harden the new primitives.**
+- Add direct tests for `Window` lifecycle, focus-scope metadata, active key
+  participation, resize hooks, and scoped image/effect teardown.
+- Add direct tests for `Modal` activation/focus behavior and key routing.
+- Add direct tests for `Overlay` render order, topmost routing, and modal
+  capture.
+- Add `Grid` edge tests for empty collections, one-column list behavior, fixed
+  columns in narrow viewports, no-wrap boundary navigation, active-cell scroll
+  anchoring, and clipped-cell scroll indicators.
+
+**Next: put decorator functionality front and center.**
+- Specify and test `scroll_y` as a real behavior decorator: scroll offset,
+  clipping, dirty propagation, child rendering area, and key/event interaction.
+- Specify and test `focusable`: stable focus IDs, enabled/visible state, child
+  forwarding, and composition with `Window` focus scopes.
+- Specify and test `with_keymap`: child-first precedence, local message
+  emission, inactive/focused participation rules, and composition with windows
+  and overlays.
+- Specify and test `with_padding` and `with_border`: child-area math,
+  rendering, dirty/layout invalidation, nested decorator order, and zero-sized
+  area behavior.
+- Effect forwarding belongs on geometry-safe single-child wrappers in v1:
+  `Panel`, `Focusable`, `KeyMapped`, `Padded`, `Bordered`, and `Modal` forward
+  child effects and teardown. `ScrollY` remains excluded until terminal effects
+  have explicit clipping/source-cropping semantics.
+- Multi-child effect composition is opt-in: `Stack` and `Overlay` keep their
+  plain child APIs and add explicitly named effect-aware APIs
+  (`Stack::push_effect_child`, `Stack::with_effect_child`,
+  `Overlay::push_effect_layer`, `Overlay::with_effect_layer`,
+  `Overlay::push_modal_effect_layer`, `Overlay::with_modal_effect_layer`) so
+  render-only and effectful children can coexist without forcing every child
+  into the effect contract.
+
+**Polish backlog.**
+- Explore fine-print text treatments for compact helper/status copy. Treat
+  true small fonts as terminal-capability-dependent; provide a portable fallback
+  using style, dimming, placement, truncation, and density rather than assuming
+  terminals can render per-region font sizes.
+- Explore icon integration for command affordances, status markers, log levels,
+  and picker/list cells. Prefer explicit icon sets and fallback glyph policy
+  over ad hoc Unicode literals.
+- Expand typed effects beyond images when a real consumer needs them: cursor
+  changes, clipboard actions, terminal title changes, attention/bell, transient
+  visual effects, and scoped teardown.
+- Explore `Window` as a logging boundary: local drains/ring buffers,
+  lifecycle-driven attach/detach, focus-aware level elevation, per-window
+  structured fields, modal diagnostic capture, and subscriptions to specific
+  drains such as app, scheduler, image, input, picker, and workspace watcher.
+  Keep implicit log context inspectable with a typed scope such as
+  `WindowLogScope { window_id, fields, drain, min_level }`; avoid hidden global
+  mutation. Prefer proving this as a `LogWindow` or `WindowLogLayer` consumer
+  of base `Window` hooks before baking logging into `Window` itself.
+
 ## Phase 1 — Demolition
 
 Delete every module that has no in-tree consumer right now.
