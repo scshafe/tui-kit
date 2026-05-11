@@ -703,6 +703,29 @@ mod tests {
     }
 
     #[test]
+    fn scheduler_failure_emits_completion_event_before_drain() {
+        let (tx, rx) = mpsc::channel();
+        let mut sched: Scheduler<i32, i32> =
+            Scheduler::new(NonZeroUsize::new(1).unwrap(), tx, |item: &i32| {
+                Err(anyhow::anyhow!("failed to process {item}"))
+            });
+
+        sched.request(7, Priority::Active, 7);
+
+        assert_eq!(
+            rx.recv_timeout(Duration::from_secs(1)).unwrap(),
+            AppEvent::scheduler_complete()
+        );
+        let completions = sched.drain();
+        assert_eq!(completions.len(), 1);
+        assert_eq!(completions[0].id, 7);
+        assert_eq!(
+            completions[0].result.as_ref().unwrap_err().to_string(),
+            "failed to process 7"
+        );
+    }
+
+    #[test]
     fn stats_report_worker_utilization_and_timing_samples() {
         let (tx, rx) = mpsc::channel();
         let (started_tx, started_rx) = mpsc::channel();
