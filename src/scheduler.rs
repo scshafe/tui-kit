@@ -679,9 +679,50 @@ mod tests {
 
         let report = sched.invalidate_epoch_namespace("thumbnail");
         release_tx.send(()).unwrap();
-        let _ = rx.recv_timeout(Duration::from_secs(1)).unwrap();
 
         assert_eq!(report.in_flight, 1);
+        assert_eq!(
+            rx.recv_timeout(Duration::from_secs(1)).unwrap(),
+            AppEvent::scheduler_complete(),
+            "cancelled in-flight work still wakes the app so consumers can observe that no completion remains"
+        );
+        assert!(sched.drain().is_empty());
+        assert_eq!(sched.stats().cancelled_total, 1);
+    }
+
+    #[test]
+    fn cancelled_in_flight_work_emits_completion_wake_without_completion() {
+        let (tx, rx) = mpsc::channel();
+        let (started_tx, started_rx) = mpsc::channel();
+        let (release_tx, release_rx) = mpsc::channel();
+        let release_rx = Arc::new(Mutex::new(release_rx));
+        let mut sched: Scheduler<i32, i32> =
+            Scheduler::new(NonZeroUsize::new(1).unwrap(), tx, move |item: &i32| {
+                started_tx.send(()).unwrap();
+                release_rx
+                    .lock()
+                    .unwrap()
+                    .recv_timeout(Duration::from_secs(1))
+                    .unwrap();
+                Ok(*item)
+            });
+        sched.request_scoped(
+            7,
+            Priority::Active,
+            7,
+            RequestScope::default().group("stale"),
+        );
+        started_rx.recv_timeout(Duration::from_secs(1)).unwrap();
+
+        let report = sched.cancel_group("stale");
+        release_tx.send(()).unwrap();
+
+        assert_eq!(report.in_flight, 1);
+        assert_eq!(
+            rx.recv_timeout(Duration::from_secs(1)).unwrap(),
+            AppEvent::scheduler_complete(),
+            "workers wake consumers after finishing cancelled work even when the completion is dropped"
+        );
         assert!(sched.drain().is_empty());
         assert_eq!(sched.stats().cancelled_total, 1);
     }
