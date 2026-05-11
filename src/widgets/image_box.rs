@@ -571,7 +571,7 @@ fn position_cursor(_origin: CellOffset) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::layout::CellPixel;
+    use crate::layout::{CellPixel, CellSize};
     use crate::testkit::{MockImageCall, MockImageSurface};
     use ratatui::style::Color;
 
@@ -668,6 +668,64 @@ mod tests {
         assert_eq!(placement.source.height, 80);
         assert_eq!(placement.cell_cols, 200);
         assert_eq!(placement.cell_rows, 200);
+    }
+
+    #[test]
+    fn image_box_zoom_shrinks_source_crop_after_target_cells_fill_canvas() {
+        let canvas = CanvasMetrics::new(CellSize::new(80, 30), CellPixel::new(10, 20));
+        let image = ImageBox::new(7, 9, PixelSize::new(1600, 1000));
+        let area = Rect::new(0, 0, 80, 30);
+
+        let native = image
+            .plan(
+                area,
+                canvas,
+                &ImageBoxState {
+                    zoom: 1.0,
+                    ..Default::default()
+                },
+            )
+            .unwrap()
+            .placement
+            .unwrap();
+        let zoomed = image
+            .plan(
+                area,
+                canvas,
+                &ImageBoxState {
+                    zoom: 2.0,
+                    ..Default::default()
+                },
+            )
+            .unwrap()
+            .placement
+            .unwrap();
+        let zoomed_again = image
+            .plan(
+                area,
+                canvas,
+                &ImageBoxState {
+                    zoom: 4.0,
+                    ..Default::default()
+                },
+            )
+            .unwrap()
+            .placement
+            .unwrap();
+
+        assert_eq!((native.cell_cols, native.cell_rows), (80, 30));
+        assert_eq!(
+            (zoomed.cell_cols, zoomed.cell_rows),
+            (native.cell_cols, native.cell_rows)
+        );
+        assert_eq!(
+            (zoomed_again.cell_cols, zoomed_again.cell_rows),
+            (native.cell_cols, native.cell_rows)
+        );
+        assert!(zoomed.source.width < native.source.width);
+        assert!(zoomed.source.height < native.source.height);
+        assert!(zoomed_again.source.width < zoomed.source.width);
+        assert!(zoomed_again.source.height < zoomed.source.height);
     }
 
     #[test]

@@ -277,6 +277,12 @@ impl ImageViewport {
         })
     }
 
+    /// Compute the terminal placement for the current viewport.
+    ///
+    /// When the scaled image is larger than the canvas, the destination cell
+    /// rectangle is clipped to the canvas. Further zoom is represented by a
+    /// smaller source crop rendered into that same cell rectangle, so unchanged
+    /// `cell_cols`/`cell_rows` does not by itself mean zoom stopped working.
     pub fn placement(
         &self,
         canvas: CanvasMetrics,
@@ -1080,6 +1086,33 @@ mod tests {
     }
 
     #[test]
+    fn placement_zoom_shrinks_source_crop_after_target_cells_fill_canvas() {
+        let canvas = CanvasMetrics::new(CellSize::new(20, 10), CellPixel::new(10, 15));
+        let mut widget = ImageViewportWidget::from_image(source_image(), canvas);
+        widget.set_zoom(ZoomFactor::new(2.0).unwrap());
+
+        let before = widget.placement().unwrap().unwrap();
+        widget.apply_zoom(ZoomDirection::In).unwrap();
+        let zoomed = widget.placement().unwrap().unwrap();
+        widget.apply_zoom(ZoomDirection::In).unwrap();
+        let zoomed_again = widget.placement().unwrap().unwrap();
+
+        assert_eq!((before.cell_cols, before.cell_rows), (20, 10));
+        assert_eq!(
+            (zoomed.cell_cols, zoomed.cell_rows),
+            (before.cell_cols, before.cell_rows)
+        );
+        assert_eq!(
+            (zoomed_again.cell_cols, zoomed_again.cell_rows),
+            (before.cell_cols, before.cell_rows)
+        );
+        assert!(zoomed.source.width < before.source.width);
+        assert!(zoomed.source.height < before.source.height);
+        assert!(zoomed_again.source.width < zoomed.source.width);
+        assert!(zoomed_again.source.height < zoomed.source.height);
+    }
+
+    #[test]
     fn placement_centers_when_scaled_image_is_smaller_than_canvas() {
         let mut viewport = ImageViewport::new(source_image());
         viewport.set_scale(ImageScale::new(0.25).unwrap());
@@ -1234,6 +1267,24 @@ mod tests {
     }
 
     #[test]
+    fn export_rgba_preserves_centered_x_geometry_under_uniform_zoom() {
+        let image = x_fixture_image(64);
+        let mut viewport = ImageViewport::new(image);
+        viewport.set_scale(ImageScale::new(2.0).unwrap());
+        viewport.set_offset(ScaledPixelOffset::new(32, 32));
+
+        let exported = viewport.export_rgba(PixelSize::new(64, 64)).unwrap();
+
+        assert_eq!(pixel(exported.rgba(), exported.size(), 0, 0), BLACK);
+        assert_eq!(pixel(exported.rgba(), exported.size(), 63, 63), BLACK);
+        assert_eq!(pixel(exported.rgba(), exported.size(), 0, 62), BLACK);
+        assert_eq!(pixel(exported.rgba(), exported.size(), 62, 0), BLACK);
+        assert_eq!(pixel(exported.rgba(), exported.size(), 32, 32), BLACK);
+        assert_eq!(pixel(exported.rgba(), exported.size(), 16, 20), WHITE);
+        assert_eq!(pixel(exported.rgba(), exported.size(), 48, 40), WHITE);
+    }
+
+    #[test]
     fn pixels_outside_the_scaled_image_are_transparent() {
         let mut viewport = ImageViewport::new(source_image());
         viewport.set_scale(ImageScale::new(2.0).unwrap());
@@ -1257,6 +1308,26 @@ mod tests {
             (viewport.offset.x as f64 + widget.width as f64 / 2.0) / viewport.scale.get(),
             (viewport.offset.y as f64 + widget.height as f64 / 2.0) / viewport.scale.get(),
         )
+    }
+
+    const BLACK: [u8; 4] = [0, 0, 0, 255];
+    const WHITE: [u8; 4] = [255, 255, 255, 255];
+
+    fn x_fixture_image(size: u32) -> ViewportImage {
+        let size = PixelSize::new(size, size);
+        let mut rgba = vec![0; rgba_len(size).unwrap()];
+        for y in 0..size.height {
+            for x in 0..size.width {
+                let color = if x == y || x.saturating_add(y) == size.width.saturating_sub(1) {
+                    BLACK
+                } else {
+                    WHITE
+                };
+                let i = (((u64::from(y) * u64::from(size.width)) + u64::from(x)) * 4) as usize;
+                rgba[i..i + 4].copy_from_slice(&color);
+            }
+        }
+        ViewportImage::new(size, rgba).unwrap()
     }
 
     fn source_image() -> ViewportImage {
