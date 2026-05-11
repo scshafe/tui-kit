@@ -1017,34 +1017,51 @@ mod tests {
     }
 
     #[test]
-    fn placement_policy_validation_reports_contract_paths() {
+    fn placement_policy_validation_reports_contract_paths_and_reasons() {
+        fn assert_config_error(error: &ConfigError, path: &str, reason: &str) {
+            assert_eq!(error.path, path);
+            assert_eq!(error.reason, reason);
+        }
+
         let mut policy = PlacementPolicy {
             min_visible_pixels: PixelSize::new(0, 1),
             ..PlacementPolicy::crop_fit_centered()
         };
         let err = PlacementEngine::new(policy.clone()).unwrap_err();
-        assert_eq!(err.path, "layout.placement_policy.min_visible_pixels");
-        assert!(err.reason.contains("non-zero"));
+        assert_config_error(
+            &err,
+            "layout.placement_policy.min_visible_pixels",
+            "width and height must both be non-zero",
+        );
 
         policy.min_visible_pixels = PixelSize::new(1, 1);
         policy.scale_basis = ImageScaleBasis::ExplicitScale(f32::NAN);
         let err = PlacementEngine::new(policy.clone()).unwrap_err();
-        assert_eq!(err.path, "layout.placement_policy.scale_basis");
-        assert!(err.reason.contains("finite and greater than zero"));
+        assert_config_error(
+            &err,
+            "layout.placement_policy.scale_basis",
+            "value must be finite and greater than zero",
+        );
 
         policy.scale_basis = ImageScaleBasis::FitToArea;
         policy.zoom_limit = ImageZoomLimitPolicy::ClampScale { min: 2.0, max: 1.0 };
         let err = PlacementEngine::new(policy.clone()).unwrap_err();
-        assert_eq!(err.path, "layout.placement_policy.zoom_limit");
-        assert!(err.reason.contains("less than or equal"));
+        assert_config_error(
+            &err,
+            "layout.placement_policy.zoom_limit",
+            "min must be less than or equal to max",
+        );
 
         policy.zoom_limit = ImageZoomLimitPolicy::ClampScale {
             min: 1.0,
             max: f32::NAN,
         };
         let err = PlacementEngine::new(policy.clone()).unwrap_err();
-        assert_eq!(err.path, "layout.placement_policy.zoom_limit.max");
-        assert!(err.reason.contains("finite and greater than zero"));
+        assert_config_error(
+            &err,
+            "layout.placement_policy.zoom_limit.max",
+            "value must be finite and greater than zero",
+        );
 
         policy.zoom_limit = ImageZoomLimitPolicy::ClampScale { min: 1.0, max: 2.0 };
         policy.anchor = ImageAnchorPolicy::PreserveImagePoint {
@@ -1052,8 +1069,11 @@ mod tests {
             y: 0.5,
         };
         let err = PlacementEngine::new(policy).unwrap_err();
-        assert_eq!(err.path, "layout.placement_policy.anchor");
-        assert!(err.reason.contains("finite"));
+        assert_config_error(
+            &err,
+            "layout.placement_policy.anchor",
+            "image point coordinates must be finite",
+        );
     }
 
     #[test]
