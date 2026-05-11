@@ -281,24 +281,60 @@ mod tests {
         assert_eq!(manager.current().unwrap().as_str(), "main");
     }
 
+    fn assert_config_error(error: &ConfigError, path: &str, reason: &str) {
+        assert_eq!(error.path, path);
+        assert_eq!(error.reason, reason);
+    }
+
     #[test]
-    fn validation_rejects_duplicate_nodes() {
+    fn validation_rejects_duplicate_nodes_with_contract_path_and_reason() {
         let error = FocusManager::new(FocusConfig::explicit(), nodes(&["dup", "dup"])).unwrap_err();
-        assert_eq!(error.path, "focus.root.nodes[1].id");
-        assert!(error.reason.contains("duplicate"));
+        assert_config_error(
+            &error,
+            "focus.root.nodes[1].id",
+            "duplicate focus node ID `dup`",
+        );
     }
 
     #[test]
     fn validation_paths_name_the_invalid_focus_field() {
         let error = FocusManager::new(FocusConfig::explicit(), nodes(&[""])).unwrap_err();
-        assert_eq!(error.path, "focus.root.nodes[0].id");
-        assert_eq!(error.reason, "focus node IDs must not be empty");
+        assert_config_error(
+            &error,
+            "focus.root.nodes[0].id",
+            "focus node IDs must not be empty",
+        );
 
         let mut manager = FocusManager::new(FocusConfig::explicit(), nodes(&["main"])).unwrap();
         let error = manager
             .push_scope("", FocusScopeKind::Modal, nodes(&["ok"]))
             .unwrap_err();
-        assert_eq!(error.path, "focus.scope.id");
-        assert_eq!(error.reason, "focus scope IDs must not be empty");
+        assert_config_error(
+            &error,
+            "focus.scope.id",
+            "focus scope IDs must not be empty",
+        );
+    }
+
+    #[test]
+    fn validation_reports_initial_focus_contract_for_hidden_or_disabled_nodes() {
+        let hidden_root = vec![FocusNode::new("hidden").hidden()];
+        let error = FocusManager::new(FocusConfig::explicit(), hidden_root).unwrap_err();
+        assert_config_error(
+            &error,
+            "focus.current",
+            "initial focus is required but no visible enabled node exists",
+        );
+
+        let mut manager = FocusManager::new(FocusConfig::explicit(), nodes(&["main"])).unwrap();
+        let disabled_modal = vec![FocusNode::new("disabled").disabled()];
+        let error = manager
+            .push_scope("dialog", FocusScopeKind::Modal, disabled_modal)
+            .unwrap_err();
+        assert_config_error(
+            &error,
+            "focus.current",
+            "pushed scope has no visible enabled node for initial focus",
+        );
     }
 }
