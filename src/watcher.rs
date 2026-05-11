@@ -177,6 +177,36 @@ mod tests {
     }
 
     #[test]
+    fn watcher_relevance_respects_watched_files_and_directories() {
+        let watched = vec![
+            WatchedPath {
+                path: PathBuf::from("src/lib.rs"),
+                is_file: true,
+            },
+            WatchedPath {
+                path: PathBuf::from("assets"),
+                is_file: false,
+            },
+        ];
+
+        let watched_file =
+            Event::new(EventKind::Modify(ModifyKind::Any)).add_path(PathBuf::from("src/lib.rs"));
+        assert!(is_relevant(&watched_file, &watched));
+
+        let sibling_file =
+            Event::new(EventKind::Modify(ModifyKind::Any)).add_path(PathBuf::from("src/main.rs"));
+        assert!(!is_relevant(&sibling_file, &watched));
+
+        let directory_child = Event::new(EventKind::Create(notify::event::CreateKind::File))
+            .add_path(PathBuf::from("assets/logo.png"));
+        assert!(is_relevant(&directory_child, &watched));
+
+        let access_event = Event::new(EventKind::Access(notify::event::AccessKind::Any))
+            .add_path(PathBuf::from("src/lib.rs"));
+        assert!(!is_relevant(&access_event, &watched));
+    }
+
+    #[test]
     fn spawn_rejects_zero_debounce_and_empty_paths() {
         let (tx, _rx) = mpsc::channel::<AppEvent<()>>();
         assert!(
