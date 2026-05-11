@@ -601,7 +601,10 @@ mod tests {
             Scheduler::new(NonZeroUsize::new(1).unwrap(), tx, |item: &i32| Ok(item * 2));
 
         sched.request(1, CustomPriority::Blocking, 21);
-        let _ = rx.recv_timeout(Duration::from_secs(1)).unwrap();
+        assert_eq!(
+            rx.recv_timeout(Duration::from_secs(1)).unwrap(),
+            AppEvent::scheduler_complete()
+        );
 
         let completions = sched.drain();
         assert_eq!(completions.len(), 1);
@@ -689,8 +692,10 @@ mod tests {
         let mut sched: Scheduler<i32, i32> =
             Scheduler::new(NonZeroUsize::new(1).unwrap(), tx, |item: &i32| Ok(item * 2));
         sched.request(1, Priority::Active, 21);
-        // wait for completion event
-        let _ = rx.recv_timeout(Duration::from_secs(1)).unwrap();
+        assert_eq!(
+            rx.recv_timeout(Duration::from_secs(1)).unwrap(),
+            AppEvent::scheduler_complete()
+        );
         let completions = sched.drain();
         assert_eq!(completions.len(), 1);
         assert_eq!(completions[0].id, 1);
