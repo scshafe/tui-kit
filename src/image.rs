@@ -438,18 +438,7 @@ impl ImageSurface for KittyImageRegistry {
         if self.placements.contains_key(&opts.placement_id) {
             self.delete_placement(opts.placement_id)?;
         }
-        write!(
-            io::stdout().lock(),
-            "\x1b_Ga=p,i={i},p={p},q=2,X={x},Y={y},W={w},H={h},c={c},r={r};\x1b\\",
-            i = opts.image_id,
-            p = opts.placement_id,
-            x = opts.source.x,
-            y = opts.source.y,
-            w = opts.source.width,
-            h = opts.source.height,
-            c = opts.cell_cols,
-            r = opts.cell_rows,
-        )?;
+        write!(io::stdout().lock(), "{}", kitty_place_escape(opts))?;
         self.placements.insert(opts.placement_id, opts.image_id);
         Ok(())
     }
@@ -538,6 +527,22 @@ fn transmit_png(image_id: u32, png: &[u8]) -> Result<()> {
 
 fn kitty_delete_placement_escape(image_id: u32, placement_id: u32) -> String {
     format!("\x1b_Ga=d,d=i,i={image_id},p={placement_id},q=2;\x1b\\")
+}
+
+fn kitty_place_escape(opts: PlaceOptions) -> String {
+    // Kitty uses lower-case x/y/w/h for the source crop. Upper-case X/Y are
+    // sub-cell destination offsets and would cause zoom crops to be ignored.
+    format!(
+        "\x1b_Ga=p,i={i},p={p},q=2,x={x},y={y},w={w},h={h},c={c},r={r};\x1b\\",
+        i = opts.image_id,
+        p = opts.placement_id,
+        x = opts.source.x,
+        y = opts.source.y,
+        w = opts.source.width,
+        h = opts.source.height,
+        c = opts.cell_cols,
+        r = opts.cell_rows,
+    )
 }
 
 /// Conventional placement id reserved for an app's main view image.
@@ -692,6 +697,27 @@ mod tests {
         assert_eq!(
             kitty_delete_placement_escape(7, 9),
             "\x1b_Ga=d,d=i,i=7,p=9,q=2;\x1b\\"
+        );
+    }
+
+    #[test]
+    fn kitty_place_escape_uses_source_crop_keys() {
+        let escape = kitty_place_escape(PlaceOptions {
+            image_id: 7,
+            placement_id: 9,
+            source: PixelRect {
+                x: 11,
+                y: 13,
+                width: 17,
+                height: 19,
+            },
+            cell_cols: 23,
+            cell_rows: 29,
+        });
+
+        assert_eq!(
+            escape,
+            "\x1b_Ga=p,i=7,p=9,q=2,x=11,y=13,w=17,h=19,c=23,r=29;\x1b\\"
         );
     }
 }

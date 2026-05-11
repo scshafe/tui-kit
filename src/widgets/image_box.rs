@@ -198,7 +198,7 @@ impl ImageBox {
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, Default, PartialEq)]
 pub struct ImageBoxStyle {
     pub border: bool,
     pub border_style: Style,
@@ -219,16 +219,6 @@ impl ImageBoxStyle {
             area.width.saturating_sub(2),
             area.height.saturating_sub(2),
         )
-    }
-}
-
-impl Default for ImageBoxStyle {
-    fn default() -> Self {
-        Self {
-            border: false,
-            border_style: Style::default(),
-            title: None,
-        }
     }
 }
 
@@ -619,8 +609,10 @@ mod tests {
 
     #[test]
     fn image_box_zoom_in_crops_source() {
-        let mut state = ImageBoxState::default();
-        state.zoom = 2.0;
+        let state = ImageBoxState {
+            zoom: 2.0,
+            ..Default::default()
+        };
         let plan = image_box()
             .plan(Rect::new(0, 0, 200, 200), pixel_metrics(200, 200), &state)
             .unwrap();
@@ -638,8 +630,10 @@ mod tests {
 
     #[test]
     fn image_box_zoom_crops_theoretical_image_to_box() {
-        let mut state = ImageBoxState::default();
-        state.zoom = 1.25;
+        let state = ImageBoxState {
+            zoom: 1.25,
+            ..Default::default()
+        };
         let zoomed = image_box()
             .plan(Rect::new(0, 0, 200, 200), pixel_metrics(200, 200), &state)
             .unwrap();
@@ -657,8 +651,10 @@ mod tests {
 
     #[test]
     fn image_box_zoom_two_and_a_half_uses_centered_crop() {
-        let mut state = ImageBoxState::default();
-        state.zoom = 2.5;
+        let state = ImageBoxState {
+            zoom: 2.5,
+            ..Default::default()
+        };
         let plan = image_box()
             .plan(Rect::new(0, 0, 200, 200), pixel_metrics(200, 200), &state)
             .unwrap();
@@ -676,8 +672,10 @@ mod tests {
 
     #[test]
     fn image_box_pan_moves_source_crop() {
-        let mut state = ImageBoxState::default();
-        state.zoom = 2.5;
+        let mut state = ImageBoxState {
+            zoom: 2.5,
+            ..Default::default()
+        };
         let initial = image_box()
             .plan(Rect::new(0, 0, 100, 100), pixel_metrics(100, 100), &state)
             .unwrap();
@@ -832,8 +830,10 @@ mod tests {
 
     #[test]
     fn image_box_reset_returns_to_default_zoom() {
-        let mut state = ImageBoxState::default();
-        state.zoom = 2.0;
+        let mut state = ImageBoxState {
+            zoom: 2.0,
+            ..Default::default()
+        };
         let zoomed = image_box()
             .plan(Rect::new(0, 0, 200, 200), pixel_metrics(200, 200), &state)
             .unwrap();

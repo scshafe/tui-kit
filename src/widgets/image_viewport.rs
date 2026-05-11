@@ -900,6 +900,7 @@ fn round_to_cells(pixels: u32, cell_pixels: u16) -> u16 {
         .min(u16::MAX as f64) as u16
 }
 
+#[allow(clippy::too_many_arguments)]
 fn copy_rgba(
     src: &[u8],
     src_width: u32,
