@@ -170,6 +170,11 @@ mod tests {
     use super::*;
     use crate::image::ImageProtocol;
 
+    fn assert_config_error(error: &ConfigError, path: &str, reason: &str) {
+        assert_eq!(error.path, path);
+        assert_eq!(error.reason, reason);
+    }
+
     #[test]
     fn terminal_config_presets_are_explicit() {
         let strict = TerminalConfig::strict_wezterm_kitty();
@@ -187,7 +192,11 @@ mod tests {
         .validate()
         .unwrap_err();
 
-        assert_eq!(error.path, "terminal.image_backend.order");
+        assert_config_error(
+            &error,
+            "terminal.image_backend.order",
+            "auto-detect backend preference requires at least one protocol",
+        );
     }
 
     #[test]
@@ -200,8 +209,11 @@ mod tests {
         .validate()
         .unwrap_err();
 
-        assert_eq!(error.path, "terminal.image_backend.order");
-        assert!(error.reason.contains("degraded fallback"));
+        assert_config_error(
+            &error,
+            "terminal.image_backend.order",
+            "Noop is a degraded fallback, not a terminal image protocol; use Disabled instead",
+        );
     }
 
     #[test]
@@ -212,8 +224,11 @@ mod tests {
         .validate()
         .unwrap_err();
 
-        assert_eq!(error.path, "terminal.image_backend.protocol");
-        assert!(error.reason.contains("not implemented"));
+        assert_config_error(
+            &error,
+            "terminal.image_backend.protocol",
+            "image protocol Sixel is not implemented yet",
+        );
     }
 
     #[test]
@@ -223,7 +238,7 @@ mod tests {
             "not implemented".to_string(),
         );
 
-        assert_eq!(error.path, "terminal.image_backend.protocol");
+        assert_config_error(&error, "terminal.image_backend.protocol", "not implemented");
         assert!(!error.path.contains("backend.backend"));
     }
 }

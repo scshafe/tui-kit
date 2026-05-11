@@ -484,13 +484,22 @@ pub fn picker_placement_id(item_index: usize) -> u32 {
 mod tests {
     use super::*;
 
+    fn assert_config_error(error: &ConfigError, path: &str, reason: &str) {
+        assert_eq!(error.path, path);
+        assert_eq!(error.reason, reason);
+    }
+
     #[test]
     fn backend_preference_rejects_empty_auto_detect_order() {
         let error = ImageBackendPreference::AutoDetect { order: vec![] }
             .validate()
             .unwrap_err();
 
-        assert_eq!(error.path, "image.backend.order");
+        assert_config_error(
+            &error,
+            "image.backend.order",
+            "auto-detect backend preference requires at least one protocol",
+        );
     }
 
     #[test]
@@ -501,9 +510,11 @@ mod tests {
         .validate()
         .unwrap_err();
 
-        assert_eq!(error.path, "image.backend.order");
-        assert!(error.reason.contains("degraded fallback"));
-        assert!(error.reason.contains("use Disabled"));
+        assert_config_error(
+            &error,
+            "image.backend.order",
+            "Noop is a degraded fallback, not a terminal image protocol; use Disabled instead",
+        );
     }
 
     #[test]
@@ -512,8 +523,11 @@ mod tests {
             .validate()
             .unwrap_err();
 
-        assert_eq!(error.path, "image.backend.protocol");
-        assert!(error.reason.contains("not implemented"));
+        assert_config_error(
+            &error,
+            "image.backend.protocol",
+            "image protocol Sixel is not implemented yet",
+        );
     }
 
     #[test]
@@ -524,8 +538,11 @@ mod tests {
         .validate()
         .unwrap_err();
 
-        assert_eq!(error.path, "image.backend.order");
-        assert!(error.reason.contains("no implemented"));
+        assert_config_error(
+            &error,
+            "image.backend.order",
+            "auto-detect order contains no implemented terminal image protocol",
+        );
     }
 
     #[test]
@@ -567,8 +584,11 @@ mod tests {
         ))
         .unwrap_err();
 
-        assert_eq!(error.path, "image.backend.protocol");
-        assert!(error.reason.contains("not implemented"));
+        assert_config_error(
+            &error,
+            "image.backend.protocol",
+            "image protocol Sixel is not implemented yet",
+        );
     }
 
     #[test]
@@ -588,8 +608,11 @@ mod tests {
         })
         .unwrap_err();
 
-        assert_eq!(error.path, "image.backend.order");
-        assert!(error.reason.contains("no implemented"));
+        assert_config_error(
+            &error,
+            "image.backend.order",
+            "auto-detect order contains no implemented terminal image protocol",
+        );
     }
 
     #[test]
