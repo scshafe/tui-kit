@@ -47,8 +47,8 @@ pub use crate::tty::{stdin_is_terminal, stdout_is_terminal, terminal_metrics, wr
 pub use crate::watcher::WorkspaceWatcher;
 pub use crate::widgets::dialog::Dialog;
 pub use crate::widgets::grid::{
-    Grid, GridCell, GridCellCanvas, GridCellPlacement, GridInputOutcome, GridNavigation,
-    GridRenderState, GridStyle,
+    Grid, GridCell, GridCellCanvas, GridCellPlacement, GridColumnMode, GridInputOutcome,
+    GridNavigation, GridRenderState, GridStyle,
 };
 pub use crate::widgets::image_box::{
     ImageBox, ImageBoxPlacement, ImageBoxPlan, ImageBoxState, ImageBoxStyle,

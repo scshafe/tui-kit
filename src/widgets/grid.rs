@@ -15,8 +15,7 @@ use ratatui::widgets::Widget;
 
 #[derive(Debug, Clone)]
 pub struct Grid {
-    min_cell_cols: u16,
-    fixed_columns: Option<u16>,
+    column_mode: GridColumnMode,
     cell_rows: u16,
     active_index: Option<usize>,
     selected_index: Option<usize>,
@@ -27,11 +26,11 @@ pub struct Grid {
 }
 
 impl Grid {
-    pub fn new(cell_rows: u16) -> Self {
+    /// Create a grid with one terminal row per cell and dynamic columns.
+    pub fn new() -> Self {
         Self {
-            min_cell_cols: 1,
-            fixed_columns: None,
-            cell_rows: cell_rows.max(1),
+            column_mode: GridColumnMode::DynamicMin { min_cell_cols: 1 },
+            cell_rows: 1,
             active_index: None,
             selected_index: None,
             wrap_navigation: false,
@@ -41,14 +40,36 @@ impl Grid {
         }
     }
 
-    pub fn with_min_cell_cols(mut self, min_cell_cols: u16) -> Self {
-        self.min_cell_cols = min_cell_cols.max(1);
-        self.fixed_columns = None;
+    /// Set the height of each grid cell in terminal rows.
+    pub fn with_cell_rows(mut self, cell_rows: u16) -> Self {
+        self.cell_rows = cell_rows.max(1);
         self
     }
 
+    /// Use dynamic column calculation with the given minimum cell width.
+    ///
+    /// This selects [`GridColumnMode::DynamicMin`] and replaces any fixed
+    /// column mode previously configured on the grid.
+    pub fn with_min_cell_cols(mut self, min_cell_cols: u16) -> Self {
+        self.column_mode = GridColumnMode::DynamicMin {
+            min_cell_cols: min_cell_cols.max(1),
+        };
+        self
+    }
+
+    /// Use a fixed number of columns, capped by viewport width and item count.
+    ///
+    /// This selects [`GridColumnMode::Fixed`] and replaces any dynamic minimum
+    /// column width previously configured on the grid.
     pub fn with_columns(mut self, columns: u16) -> Self {
-        self.fixed_columns = Some(columns.max(1));
+        self.column_mode = GridColumnMode::Fixed {
+            columns: columns.max(1),
+        };
+        self
+    }
+
+    pub fn with_column_mode(mut self, mode: GridColumnMode) -> Self {
+        self.column_mode = mode.normalized();
         self
     }
 
@@ -109,14 +130,24 @@ impl Grid {
         self.focus_capture
     }
 
+    pub fn cell_rows(&self) -> u16 {
+        self.cell_rows
+    }
+
+    pub fn column_mode(&self) -> GridColumnMode {
+        self.column_mode
+    }
+
     pub fn columns_for_width(&self, width: u16, item_count: usize) -> u16 {
-        match self.fixed_columns {
-            Some(columns) if item_count > 0 && width > 0 => columns
+        match self.column_mode.normalized() {
+            GridColumnMode::Fixed { columns } if item_count > 0 && width > 0 => columns
                 .max(1)
                 .min(width)
                 .min(item_count.min(usize::from(u16::MAX)) as u16),
-            Some(_) => 0,
-            None => grid_columns(width, self.min_cell_cols, item_count),
+            GridColumnMode::Fixed { .. } => 0,
+            GridColumnMode::DynamicMin { min_cell_cols } => {
+                grid_columns(width, min_cell_cols, item_count)
+            }
         }
     }
 
@@ -191,6 +222,11 @@ impl Grid {
         }
     }
 
+    /// Render the grid without mutating scroll state.
+    ///
+    /// Visible scroll is derived from the active index first, then the selected
+    /// index. Consumers that need sticky or momentum scroll should own that
+    /// state outside this renderer.
     pub fn render<T, F>(
         &self,
         area: Rect,
@@ -338,7 +374,29 @@ impl Grid {
 
 impl Default for Grid {
     fn default() -> Self {
-        Self::new(1)
+        Self::new()
+    }
+}
+
+/// Column calculation strategy for [`Grid`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GridColumnMode {
+    /// Use exactly this many columns, capped by viewport width and item count.
+    Fixed { columns: u16 },
+    /// Derive as many columns as fit while each cell has at least this width.
+    DynamicMin { min_cell_cols: u16 },
+}
+
+impl GridColumnMode {
+    fn normalized(self) -> Self {
+        match self {
+            Self::Fixed { columns } => Self::Fixed {
+                columns: columns.max(1),
+            },
+            Self::DynamicMin { min_cell_cols } => Self::DynamicMin {
+                min_cell_cols: min_cell_cols.max(1),
+            },
+        }
     }
 }
 
@@ -637,7 +695,7 @@ mod tests {
         let mut buffer = Buffer::empty(Rect::new(0, 0, 50, 12));
         let mut image_areas = Vec::new();
 
-        let state = Grid::new(3).with_min_cell_cols(10).render(
+        let state = Grid::new().with_cell_rows(3).with_min_cell_cols(10).render(
             Rect::new(10, 4, 36, 6),
             &mut buffer,
             &items,
@@ -660,7 +718,7 @@ mod tests {
     #[test]
     fn empty_grid_renders_default_state_and_ignores_input() {
         let items: [usize; 0] = [];
-        let mut grid = Grid::new(2).with_active_index(Some(0));
+        let mut grid = Grid::new().with_cell_rows(2).with_active_index(Some(0));
         let mut buffer = Buffer::empty(Rect::new(0, 0, 10, 4));
 
         let state = grid.render(Rect::new(0, 0, 10, 4), &mut buffer, &items, |_, _| {});
@@ -708,7 +766,7 @@ mod tests {
         let mut surface = MockImageSurface::default();
         let mut image_areas = Vec::new();
 
-        let state = Grid::new(4).with_min_cell_cols(10).render(
+        let state = Grid::new().with_cell_rows(4).with_min_cell_cols(10).render(
             Rect::new(5, 2, 30, 4),
             &mut buffer,
             &items,
@@ -780,7 +838,8 @@ mod tests {
         let items = [0, 1, 2, 3, 4, 5, 6, 7];
         let mut buffer = Buffer::empty(Rect::new(0, 0, 20, 5));
 
-        let state = Grid::new(4)
+        let state = Grid::new()
+            .with_cell_rows(4)
             .with_min_cell_cols(10)
             .with_selected_index(Some(7))
             .render(
@@ -800,7 +859,7 @@ mod tests {
     #[test]
     fn one_column_grid_behaves_like_a_list() {
         let items = ["a", "b", "c"];
-        let mut grid = Grid::new(1).with_columns(1).with_active_index(Some(0));
+        let mut grid = Grid::new().with_columns(1).with_active_index(Some(0));
         let mut buffer = Buffer::empty(Rect::new(0, 0, 10, 3));
 
         let state = grid.render(
@@ -829,7 +888,7 @@ mod tests {
         let items = [0, 1, 2, 3, 4];
         let mut buffer = Buffer::empty(Rect::new(0, 0, 2, 3));
 
-        let state = Grid::new(1).with_columns(3).render(
+        let state = Grid::new().with_columns(3).render(
             Rect::new(0, 0, 2, 3),
             &mut buffer,
             &items,
@@ -844,7 +903,7 @@ mod tests {
 
     #[test]
     fn navigation_without_wrap_stays_at_row_boundaries() {
-        let mut grid = Grid::new(1).with_columns(3).with_active_index(Some(2));
+        let mut grid = Grid::new().with_columns(3).with_active_index(Some(2));
 
         assert_eq!(
             grid.handle_key(Key::Right, 30, 5),
@@ -865,7 +924,8 @@ mod tests {
         let items = [0, 1, 2, 3, 4, 5, 6, 7];
         let mut buffer = Buffer::empty(Rect::new(0, 0, 20, 5));
 
-        let state = Grid::new(4)
+        let state = Grid::new()
+            .with_cell_rows(4)
             .with_min_cell_cols(10)
             .with_active_index(Some(7))
             .render(
@@ -892,7 +952,7 @@ mod tests {
         let mut top_buffer = Buffer::empty(area);
         let mut bottom_buffer = Buffer::empty(area);
 
-        Grid::new(4).with_min_cell_cols(10).render(
+        Grid::new().with_cell_rows(4).with_min_cell_cols(10).render(
             area,
             &mut top_buffer,
             &items,
@@ -900,7 +960,8 @@ mod tests {
                 canvas.set_string(0, 0, cell.item.to_string(), canvas.style());
             },
         );
-        Grid::new(4)
+        Grid::new()
+            .with_cell_rows(4)
             .with_min_cell_cols(10)
             .with_active_index(Some(7))
             .render(area, &mut bottom_buffer, &items, |cell, canvas| {
@@ -916,7 +977,7 @@ mod tests {
         let items = ["a", "b"];
         let mut buffer = Buffer::empty(Rect::new(0, 0, 20, 2));
 
-        Grid::new(1)
+        Grid::new()
             .with_min_cell_cols(10)
             .with_selected_index(Some(1))
             .with_selected_cell_style(Style::default().add_modifier(Modifier::REVERSED))
@@ -938,7 +999,7 @@ mod tests {
 
     #[test]
     fn keyboard_navigation_moves_and_selects_active_cell() {
-        let mut grid = Grid::new(1)
+        let mut grid = Grid::new()
             .with_columns(3)
             .with_active_index(Some(0))
             .with_wrap_navigation(true);
@@ -967,7 +1028,7 @@ mod tests {
         let items = ["a", "b"];
         let mut buffer = Buffer::empty(Rect::new(0, 0, 20, 2));
 
-        Grid::new(1)
+        Grid::new()
             .with_min_cell_cols(10)
             .with_active_index(Some(1))
             .with_active_cell_style(Style::default().add_modifier(Modifier::BOLD))

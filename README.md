@@ -60,7 +60,7 @@ fn render_root(area: Rect) -> anyhow::Result<Buffer> {
 }
 
 fn render_picker(area: Rect, buffer: &mut Buffer, items: &[&str], active: Option<usize>) {
-    Grid::new(1)
+    Grid::new()
         .with_columns(1)
         .with_active_index(active)
         .render(area, buffer, items, |cell, canvas| {
@@ -84,6 +84,9 @@ for effect in media.teardown_effects()? {
     effect.apply_to_registry(terminal.images())?;
 }
 ```
+
+`scroll_y` is buffer-only for now. Scrolled image/effect children need explicit
+clipping and source-cropping semantics before they can be forwarded safely.
 
 ## ImageBox
 

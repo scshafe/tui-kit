@@ -186,6 +186,11 @@ pub trait ElementExt: Element + Sized {
         Focusable::new(self)
     }
 
+    /// Wrap this element with a local keymap decorator.
+    ///
+    /// `Window` also has an inherent `with_keymap` method. On a `Window`, Rust
+    /// resolves the inherent method first, configuring the window key scope
+    /// instead of wrapping it in [`KeyMapped`].
     fn with_keymap(self, keymap: KeyMap<Self::Message>) -> KeyMapped<Self>
     where
         Self::Message: Clone,
@@ -205,6 +210,9 @@ pub trait ElementExt: Element + Sized {
 impl<E: Element> ElementExt for E {}
 
 /// Cell padding around an element.
+///
+/// Tuple conversions use `(horizontal, vertical)` for two values and
+/// `(left, right, top, bottom)` for four values.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub struct Padding {
     pub left: u16,
@@ -901,9 +909,13 @@ pub enum StackDirection {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum StackConstraint {
+    /// Exact terminal-cell length along the stack direction.
     Length(u16),
+    /// Percentage of the available stack length, capped at 100.
     Percentage(u16),
+    /// Minimum terminal-cell length that also shares remaining space.
     Min(u16),
+    /// Weighted share of remaining space after fixed reservations.
     Fill(u16),
 }
 
@@ -914,11 +926,11 @@ fn solve_stack_lengths(total: u16, constraints: &[StackConstraint]) -> Vec<u16> 
 
     let mut lengths = vec![0u16; constraints.len()];
     let mut reserved = 0u16;
-    let mut fill_weight = 0u16;
+    let mut flex_weight = 0u16;
 
     for (idx, constraint) in constraints.iter().copied().enumerate() {
         match constraint {
-            StackConstraint::Length(value) | StackConstraint::Min(value) => {
+            StackConstraint::Length(value) => {
                 let value = value.min(total.saturating_sub(reserved));
                 lengths[idx] = value;
                 reserved = reserved.saturating_add(value);
@@ -929,28 +941,36 @@ fn solve_stack_lengths(total: u16, constraints: &[StackConstraint]) -> Vec<u16> 
                 lengths[idx] = value;
                 reserved = reserved.saturating_add(value);
             }
+            StackConstraint::Min(value) => {
+                let value = value.min(total.saturating_sub(reserved));
+                lengths[idx] = value;
+                reserved = reserved.saturating_add(value);
+                flex_weight = flex_weight.saturating_add(1);
+            }
             StackConstraint::Fill(weight) => {
-                fill_weight = fill_weight.saturating_add(weight.max(1));
+                flex_weight = flex_weight.saturating_add(weight.max(1));
             }
         }
     }
 
     let mut remaining = total.saturating_sub(reserved);
-    if fill_weight == 0 {
+    if flex_weight == 0 {
         return lengths;
     }
     for (idx, constraint) in constraints.iter().copied().enumerate() {
-        if let StackConstraint::Fill(weight) = constraint {
-            let weight = weight.max(1);
-            let value = if weight == fill_weight {
-                remaining
-            } else {
-                ((u32::from(remaining) * u32::from(weight)) / u32::from(fill_weight)) as u16
-            };
-            lengths[idx] = value;
-            remaining = remaining.saturating_sub(value);
-            fill_weight = fill_weight.saturating_sub(weight);
-        }
+        let weight = match constraint {
+            StackConstraint::Min(_) => 1,
+            StackConstraint::Fill(weight) => weight.max(1),
+            StackConstraint::Length(_) | StackConstraint::Percentage(_) => continue,
+        };
+        let value = if weight == flex_weight {
+            remaining
+        } else {
+            ((u32::from(remaining) * u32::from(weight)) / u32::from(flex_weight)) as u16
+        };
+        lengths[idx] = lengths[idx].saturating_add(value);
+        remaining = remaining.saturating_sub(value);
+        flex_weight = flex_weight.saturating_sub(weight);
     }
     lengths
 }
@@ -1572,6 +1592,15 @@ impl Default for WindowChrome {
 }
 
 /// Behavioral lifecycle/key/effect boundary around a child element.
+///
+/// `active` means the window participates in its local key scope. `focused`
+/// means key input is offered to the child before the window keymap. `entered`
+/// means the enter lifecycle hook has fired and the matching exit hook has not.
+///
+/// `activate` fires prefetch, enter, then focus when needed. `deactivate`
+/// fires blur before exit. The lower-level `focus`, `blur`, `enter`, and
+/// `exit` methods are public so callers can model unusual focus transitions;
+/// as a result, `focused && !active` is valid and routes child-first key input.
 pub struct Window<E>
 where
     E: Element,
@@ -1593,7 +1622,7 @@ where
     child_cache: Option<Buffer>,
     child_cache_area: Option<Rect>,
     stats: WindowRenderStats,
-    effect_placements: BTreeSet<u32>,
+    effect_placements: BTreeSet<(u32, u32)>,
     hooks: WindowHooks,
 }
 
@@ -1677,6 +1706,10 @@ where
         &mut self.keymap
     }
 
+    /// Set the window-local keymap.
+    ///
+    /// This is the inherent `Window` method, not the [`ElementExt`] decorator.
+    /// Bindings participate only while the window is active or focused.
     pub fn with_keymap(mut self, keymap: KeyMap<E::Message>) -> Self {
         self.keymap = keymap;
         self
@@ -1863,7 +1896,8 @@ where
         }
     }
 
-    pub fn registered_effect_placements(&self) -> &BTreeSet<u32> {
+    /// Image placements currently owned by this window as `(image_id, placement_id)`.
+    pub fn registered_effect_placements(&self) -> &BTreeSet<(u32, u32)> {
         &self.effect_placements
     }
 
@@ -1952,6 +1986,8 @@ where
         if !(self.active || self.focused) {
             return Ok(ComponentOutcome::Ignored);
         }
+        // Focus controls child-first routing; active alone enables the
+        // window-local keymap without handing input to the child.
         if self.focused {
             let child = self.child.handle_key(key)?;
             if child.is_handled() {
@@ -2007,8 +2043,25 @@ where
         let child_area = self.child_area(area);
         let effects = self.child.terminal_effects(child_area)?;
         for effect in &effects {
-            if let TerminalEffect::PlaceImage { options, .. } = effect {
-                self.effect_placements.insert(options.placement_id);
+            match effect {
+                TerminalEffect::PlaceImage { options, .. } => {
+                    self.effect_placements
+                        .insert((options.image_id, options.placement_id));
+                }
+                TerminalEffect::DeleteImagePlacement {
+                    image_id,
+                    placement_id,
+                } => {
+                    self.effect_placements.remove(&(*image_id, *placement_id));
+                }
+                TerminalEffect::DeletePlacement { placement_id } => {
+                    self.effect_placements
+                        .retain(|(_, registered)| registered != placement_id);
+                }
+                TerminalEffect::DeleteAllPlacements | TerminalEffect::ForgetAllImages => {
+                    self.effect_placements.clear();
+                }
+                TerminalEffect::EnsureImageLoaded { .. } | TerminalEffect::FlushImages => {}
             }
         }
         Ok(effects)
@@ -2016,13 +2069,38 @@ where
 
     fn teardown_effects(&mut self) -> Result<Vec<TerminalEffect>> {
         let mut effects = self.child.teardown_effects()?;
-        let already: BTreeSet<u32> = effects
+        let already_deleted_images: BTreeSet<(u32, u32)> = effects
             .iter()
-            .filter_map(TerminalEffect::placement_id)
+            .filter_map(|effect| match effect {
+                TerminalEffect::DeleteImagePlacement {
+                    image_id,
+                    placement_id,
+                } => Some((*image_id, *placement_id)),
+                _ => None,
+            })
             .collect();
-        for placement_id in std::mem::take(&mut self.effect_placements) {
-            if !already.contains(&placement_id) {
-                effects.push(TerminalEffect::DeletePlacement { placement_id });
+        let already_deleted_placements: BTreeSet<u32> = effects
+            .iter()
+            .filter_map(|effect| match effect {
+                TerminalEffect::DeletePlacement { placement_id } => Some(*placement_id),
+                _ => None,
+            })
+            .collect();
+        let all_deleted = effects.iter().any(|effect| {
+            matches!(
+                effect,
+                TerminalEffect::DeleteAllPlacements | TerminalEffect::ForgetAllImages
+            )
+        });
+        for (image_id, placement_id) in std::mem::take(&mut self.effect_placements) {
+            if !all_deleted
+                && !already_deleted_images.contains(&(image_id, placement_id))
+                && !already_deleted_placements.contains(&placement_id)
+            {
+                effects.push(TerminalEffect::DeleteImagePlacement {
+                    image_id,
+                    placement_id,
+                });
             }
         }
         Ok(effects)
@@ -2295,8 +2373,19 @@ where
     E: Element,
     E::Message: Clone,
 {
+    /// Create and immediately activate a modal window.
+    ///
+    /// Because activation happens inside the constructor, lifecycle hooks added
+    /// through `window_mut` after construction will not observe the initial
+    /// prefetch, enter, or focus events. Use [`Self::from_window`] when a modal
+    /// needs hooks registered before activation.
     pub fn new(id: impl Into<ComponentId>, child: E) -> Self {
-        let mut window = Window::new(id, child).modal();
+        Self::from_window(Window::new(id, child))
+    }
+
+    /// Convert a preconfigured window into an activated modal.
+    pub fn from_window(window: Window<E>) -> Self {
+        let mut window = window.modal();
         window.activate();
         Self { window }
     }
@@ -2376,6 +2465,10 @@ where
 }
 
 /// Layered overlay surface.
+///
+/// Modal layers capture key routing, but they do not hide or suppress rendering
+/// and terminal effects from lower layers. Every layer remains visually and
+/// effectually active unless the caller removes it.
 pub struct Overlay<M> {
     id: ComponentId,
     layers: Vec<OverlayLayer<M>>,
@@ -2815,6 +2908,81 @@ mod tests {
         }
     }
 
+    #[derive(Debug, Clone)]
+    struct ToggleEffectProbeElement {
+        id: ComponentId,
+        delete_next: std::rc::Rc<std::cell::Cell<bool>>,
+        dirty: DirtyState,
+    }
+
+    impl ToggleEffectProbeElement {
+        fn new(id: &'static str) -> (Self, std::rc::Rc<std::cell::Cell<bool>>) {
+            let delete_next = std::rc::Rc::new(std::cell::Cell::new(false));
+            (
+                Self {
+                    id: ComponentId::new(id),
+                    delete_next: std::rc::Rc::clone(&delete_next),
+                    dirty: DirtyState::paint(DirtyReason::Explicit),
+                },
+                delete_next,
+            )
+        }
+    }
+
+    impl Element for ToggleEffectProbeElement {
+        type Message = TestCommand;
+
+        fn id(&self) -> &ComponentId {
+            &self.id
+        }
+
+        fn render(&mut self, _area: Rect, _buffer: &mut Buffer) -> Result<()> {
+            self.clear_dirty();
+            Ok(())
+        }
+
+        fn dirty(&self) -> &DirtyState {
+            &self.dirty
+        }
+
+        fn mark_dirty(&mut self, reason: DirtyReason) {
+            self.dirty.mark_image_placement(reason);
+        }
+
+        fn clear_dirty(&mut self) {
+            self.dirty.clear();
+        }
+    }
+
+    impl EffectElement for ToggleEffectProbeElement {
+        fn terminal_effects(&mut self, area: Rect) -> Result<Vec<TerminalEffect>> {
+            if self.delete_next.get() {
+                return Ok(vec![TerminalEffect::DeleteImagePlacement {
+                    image_id: 3,
+                    placement_id: 4,
+                }]);
+            }
+            Ok(vec![TerminalEffect::PlaceImage {
+                origin: CellOffset {
+                    col: area.x,
+                    row: area.y,
+                },
+                options: PlaceOptions {
+                    image_id: 3,
+                    placement_id: 4,
+                    source: PixelRect {
+                        x: 0,
+                        y: 0,
+                        width: 8,
+                        height: 8,
+                    },
+                    cell_cols: area.width,
+                    cell_rows: area.height,
+                },
+            }])
+        }
+    }
+
     fn command_map(trigger: char, command: TestCommand) -> KeyMap<TestCommand> {
         let mut keymap = KeyMap::new();
         keymap.bind(KeyTrigger::Char(trigger), command);
@@ -2856,6 +3024,18 @@ mod tests {
         assert_eq!(areas[0].height, 1);
         assert_eq!(areas[1].height, 2);
         assert_eq!(areas[2].height, 2);
+    }
+
+    #[test]
+    fn stack_min_constraints_reserve_then_grow_with_remaining_space() {
+        let stack: Stack<()> = Stack::vertical("stack")
+            .with_child(Text::with_id("a", "a"), StackConstraint::Min(1))
+            .with_child(Text::with_id("b", "b"), StackConstraint::Fill(1));
+
+        let areas = stack.layout_areas(Rect::new(0, 0, 10, 5));
+
+        assert_eq!(areas[0].height, 3);
+        assert_eq!(areas[1].height, 2);
     }
 
     #[test]
@@ -3134,7 +3314,10 @@ mod tests {
                 if *origin == CellOffset { col: 2, row: 3 }
                     && options.placement_id == 42
         ));
-        assert!(modal.window().registered_effect_placements().contains(&42));
+        assert!(modal
+            .window()
+            .registered_effect_placements()
+            .contains(&(1, 42)));
 
         assert_eq!(
             modal.teardown_effects()?,
@@ -3337,7 +3520,7 @@ mod tests {
         assert!(effects
             .iter()
             .any(|effect| matches!(effect, TerminalEffect::PlaceImage { options, .. } if options.placement_id == 9)));
-        assert!(window.registered_effect_placements().contains(&9));
+        assert!(window.registered_effect_placements().contains(&(7, 9)));
 
         let teardown = window.teardown_effects()?;
         assert_eq!(
@@ -3345,6 +3528,47 @@ mod tests {
             vec![TerminalEffect::DeleteImagePlacement {
                 image_id: 7,
                 placement_id: 9,
+            }]
+        );
+        assert!(window.registered_effect_placements().is_empty());
+        Ok(())
+    }
+
+    #[test]
+    fn window_prunes_effect_tracking_when_child_deletes_during_render() -> Result<()> {
+        let (child, delete_next) = ToggleEffectProbeElement::new("effect");
+        let mut window = Window::new("window", child);
+
+        window.terminal_effects(Rect::new(0, 0, 4, 2))?;
+        assert!(window.registered_effect_placements().contains(&(3, 4)));
+
+        delete_next.set(true);
+        let effects = window.terminal_effects(Rect::new(0, 0, 4, 2))?;
+
+        assert_eq!(
+            effects,
+            vec![TerminalEffect::DeleteImagePlacement {
+                image_id: 3,
+                placement_id: 4,
+            }]
+        );
+        assert!(window.registered_effect_placements().is_empty());
+        assert!(window.teardown_effects()?.is_empty());
+        Ok(())
+    }
+
+    #[test]
+    fn window_fallback_teardown_uses_image_placement_pair() -> Result<()> {
+        let (child, _delete_next) = ToggleEffectProbeElement::new("effect");
+        let mut window = Window::new("window", child);
+
+        window.terminal_effects(Rect::new(0, 0, 4, 2))?;
+
+        assert_eq!(
+            window.teardown_effects()?,
+            vec![TerminalEffect::DeleteImagePlacement {
+                image_id: 3,
+                placement_id: 4,
             }]
         );
         assert!(window.registered_effect_placements().is_empty());
@@ -3440,6 +3664,23 @@ mod tests {
         assert!(modal.window().has_entered());
         assert_eq!(scope.kind, FocusScopeKind::Modal);
         assert_eq!(scope.id.as_str(), "modal");
+    }
+
+    #[test]
+    fn modal_from_window_allows_hooks_before_activation() {
+        use std::cell::RefCell;
+        use std::rc::Rc;
+
+        let events = Rc::new(RefCell::new(Vec::new()));
+        let window = Window::new("modal", Text::new("body")).on_enter({
+            let events = Rc::clone(&events);
+            move |event| events.borrow_mut().push(event)
+        });
+
+        let modal = Modal::from_window(window);
+
+        assert!(modal.window().is_active());
+        assert_eq!(*events.borrow(), vec![WindowLifecycleEvent::Enter]);
     }
 
     #[test]
