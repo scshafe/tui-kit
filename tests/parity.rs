@@ -548,6 +548,32 @@ fn repeated_in_flight_cancellation_is_counted_once_in_both() {
     assert!(real.completions.is_empty());
 }
 
+#[test]
+fn run_all_continues_after_dropped_in_flight_completion_in_both() {
+    let mut det: DeterministicScheduler<i32, i32> = DeterministicScheduler::new(|item| Ok(*item));
+    det.request_scoped(
+        7,
+        Priority::Active,
+        7,
+        RequestScope::default().group("stale"),
+    );
+    assert_eq!(det.begin_one(), Some(7));
+    det.request(8, Priority::Background, 8);
+
+    let report = det.cancel_group("stale");
+    assert_eq!(report.queued, 0);
+    assert_eq!(report.in_flight, 1);
+    assert_eq!(det.run_all(), vec![8]);
+    assert_eq!(
+        det.drain().into_iter().map(|c| c.id).collect::<Vec<_>>(),
+        vec![8]
+    );
+
+    let real = run_after_dropped_in_flight_completion_on_real_scheduler();
+    assert_eq!(real.report, report);
+    assert_eq!(real.completions, vec![8]);
+}
+
 struct InFlightCancelOutcome {
     report: CancellationReport,
     completions: Vec<u64>,
@@ -593,6 +619,46 @@ fn repeated_in_flight_cancellation_on_real_scheduler() -> RepeatedInFlightCancel
         second_report,
         cancelled_total: sched.stats().cancelled_total,
         completions: sched.drain().into_iter().map(|c| c.id).collect(),
+    }
+}
+
+fn run_after_dropped_in_flight_completion_on_real_scheduler() -> InFlightCancelOutcome {
+    let (tx, rx) = mpsc::channel();
+    let (started_tx, started_rx) = mpsc::channel();
+    let (release_tx, release_rx) = mpsc::channel();
+    let release_rx = Arc::new(Mutex::new(release_rx));
+    let mut sched: Scheduler<i32, i32> =
+        Scheduler::new(NonZeroUsize::new(1).unwrap(), tx, move |item: &i32| {
+            if *item == 7 {
+                started_tx.send(()).unwrap();
+                release_rx
+                    .lock()
+                    .unwrap()
+                    .recv_timeout(Duration::from_secs(2))
+                    .unwrap();
+            }
+            Ok(*item)
+        });
+
+    sched.request_scoped(
+        7,
+        Priority::Active,
+        7,
+        RequestScope::default().group("stale"),
+    );
+    started_rx.recv_timeout(Duration::from_secs(2)).unwrap();
+    sched.request(8, Priority::Background, 8);
+    let report = sched.cancel_group("stale");
+    release_tx.send(()).unwrap();
+
+    for _ in 0..2 {
+        rx.recv_timeout(Duration::from_secs(2)).unwrap();
+    }
+    let completions = sched.drain().into_iter().map(|c| c.id).collect();
+
+    InFlightCancelOutcome {
+        report,
+        completions,
     }
 }
 

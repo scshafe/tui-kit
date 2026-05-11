@@ -402,8 +402,19 @@ impl<Item, Out, P: Ord + Clone> DeterministicScheduler<Item, Out, P> {
 
     pub fn run_all(&mut self) -> Vec<u64> {
         let mut ran = Vec::new();
-        while let Some(id) = self.run_one() {
-            ran.push(id);
+        loop {
+            if self.in_flight.is_some() {
+                if let Some(id) = self.finish_in_flight() {
+                    ran.push(id);
+                }
+                continue;
+            }
+            if self.queue.is_empty() {
+                break;
+            }
+            if let Some(id) = self.run_one() {
+                ran.push(id);
+            }
         }
         ran
     }
