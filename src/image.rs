@@ -1,9 +1,10 @@
 //! Image-on-text-cells lifecycle management.
 //!
 //! Currently the Kitty graphics protocol and an explicit no-op degraded
-//! surface are implemented. The [`ImageSurface`] trait is the seam for future
-//! Sixel and iTerm2 backends: same `ensure_loaded → place → delete` lifecycle,
-//! different wire format and capabilities.
+//! surface are implemented. The [`ImageSurface`] trait is the seam for terminal
+//! image protocols: same `ensure_loaded → place → delete` lifecycle,
+//! different wire format and capabilities. Additional protocols may be added
+//! through this trait.
 //!
 //! ## Lifecycle
 //!
@@ -37,8 +38,7 @@ use std::io::{self, Write};
 /// A surface that owns the image lifecycle for a particular protocol.
 ///
 /// Implementations: [`KittyImageRegistry`], [`NoopImageSurface`], and
-/// [`ImageSurfaceRegistry`]. Sixel and iTerm2 surfaces will implement this
-/// trait when added.
+/// [`ImageSurfaceRegistry`].
 pub trait ImageSurface {
     fn capabilities(&self) -> ImageCapabilities;
     fn ensure_loaded(&mut self, image_id: u32, png: &[u8]) -> Result<()>;
@@ -56,8 +56,6 @@ pub trait ImageSurface {
 #[non_exhaustive]
 pub enum ImageProtocol {
     Kitty,
-    Sixel,
-    ITerm2,
     Noop,
 }
 
@@ -106,11 +104,8 @@ impl ImageSurfaceRegistry {
                 SelectedImageSurface::Kitty(KittyImageRegistry::default())
             }
             ImageBackendPreference::Disabled => SelectedImageSurface::Noop(NoopImageSurface),
-            ImageBackendPreference::Explicit(protocol) => {
-                return Err(unsupported_protocol_error(
-                    *protocol,
-                    "image.backend.protocol",
-                ));
+            ImageBackendPreference::Explicit(ImageProtocol::Noop) => {
+                unreachable!("Explicit(Noop) is rejected by Validate::validate above")
             }
             ImageBackendPreference::AutoDetect { order } => select_auto_detect_surface(order)?,
         };
@@ -255,22 +250,11 @@ fn select_auto_detect_surface(
     ))
 }
 
-fn unsupported_protocol_error(protocol: ImageProtocol, path: &'static str) -> ConfigError {
-    ConfigError::new(
-        path,
-        format!("image protocol {protocol:?} is not implemented yet"),
-    )
-}
-
 fn explicit_noop_error(path: &'static str) -> ConfigError {
     ConfigError::new(
         path,
         "Noop is a degraded fallback, not a terminal image protocol; use Disabled instead",
     )
-}
-
-fn image_protocol_is_implemented(protocol: ImageProtocol) -> bool {
-    matches!(protocol, ImageProtocol::Kitty)
 }
 
 impl Validate for ImageBackendPreference {
@@ -279,23 +263,12 @@ impl Validate for ImageBackendPreference {
             Self::Explicit(ImageProtocol::Noop) => {
                 Err(explicit_noop_error("image.backend.protocol"))
             }
-            Self::Explicit(protocol) if !image_protocol_is_implemented(*protocol) => Err(
-                unsupported_protocol_error(*protocol, "image.backend.protocol"),
-            ),
             Self::AutoDetect { order } if order.is_empty() => Err(ConfigError::new(
                 "image.backend.order",
                 "auto-detect backend preference requires at least one protocol",
             )),
             Self::AutoDetect { order } if order.contains(&ImageProtocol::Noop) => {
                 Err(explicit_noop_error("image.backend.order"))
-            }
-            Self::AutoDetect { order }
-                if !order.iter().copied().any(image_protocol_is_implemented) =>
-            {
-                Err(ConfigError::new(
-                    "image.backend.order",
-                    "auto-detect order contains no implemented terminal image protocol",
-                ))
             }
             _ => Ok(()),
         }
@@ -583,28 +556,6 @@ mod tests {
     }
 
     #[test]
-    fn backend_preference_rejects_unimplemented_explicit_protocol() {
-        let error = ImageBackendPreference::Explicit(ImageProtocol::Sixel)
-            .validate()
-            .unwrap_err();
-
-        assert_eq!(error.path, "image.backend.protocol");
-        assert!(error.reason.contains("not implemented"));
-    }
-
-    #[test]
-    fn backend_preference_rejects_auto_detect_without_implemented_protocol() {
-        let error = ImageBackendPreference::AutoDetect {
-            order: vec![ImageProtocol::Sixel, ImageProtocol::ITerm2],
-        }
-        .validate()
-        .unwrap_err();
-
-        assert_eq!(error.path, "image.backend.order");
-        assert!(error.reason.contains("no implemented"));
-    }
-
-    #[test]
     fn surfaces_report_machine_readable_capabilities() {
         let kitty = KittyImageRegistry::default().capabilities();
         assert_eq!(kitty.protocol, ImageProtocol::Kitty);
@@ -637,35 +588,13 @@ mod tests {
     }
 
     #[test]
-    fn surface_registry_rejects_unimplemented_explicit_protocol() {
-        let error = ImageSurfaceRegistry::from_preference(ImageBackendPreference::Explicit(
-            ImageProtocol::Sixel,
-        ))
-        .unwrap_err();
-
-        assert_eq!(error.path, "image.backend.protocol");
-        assert!(error.reason.contains("not implemented"));
-    }
-
-    #[test]
-    fn surface_registry_auto_detects_first_implemented_protocol() {
+    fn surface_registry_auto_detects_kitty_from_order() {
         let registry = ImageSurfaceRegistry::from_preference(ImageBackendPreference::AutoDetect {
-            order: vec![ImageProtocol::ITerm2, ImageProtocol::Kitty],
+            order: vec![ImageProtocol::Kitty],
         })
         .unwrap();
 
         assert_eq!(registry.capabilities().protocol, ImageProtocol::Kitty);
-    }
-
-    #[test]
-    fn surface_registry_rejects_auto_detect_without_supported_protocol() {
-        let error = ImageSurfaceRegistry::from_preference(ImageBackendPreference::AutoDetect {
-            order: vec![ImageProtocol::Sixel],
-        })
-        .unwrap_err();
-
-        assert_eq!(error.path, "image.backend.order");
-        assert!(error.reason.contains("no implemented"));
     }
 
     #[test]
