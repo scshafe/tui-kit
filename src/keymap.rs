@@ -90,7 +90,7 @@ impl KeyTrigger {
 }
 
 impl SpecialKey {
-    pub fn from_key_event(key: KeyEvent) -> Option<Self> {
+    fn from_key_event(key: KeyEvent) -> Option<Self> {
         Some(match key {
             KeyEvent::Up => Self::Up,
             KeyEvent::Down => Self::Down,
