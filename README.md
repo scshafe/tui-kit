@@ -4,30 +4,35 @@ Opinionated middleware for building terminal UI applications. Sits on top of [`r
 
 ## Status
 
-Early. Extracted from [c4tui](https://github.com/scshafe/c4tui) as the reusable substrate. The API floor is what c4tui consumes; the consumer-gate in CI fails the build if c4tui breaks. See `PLAN_REWRITE.md` for the design discipline.
+Early. The crate is a domain-neutral substrate for terminal applications that need typed input, focus scopes, buffer-rendered components, image placement, layout math, scheduling, and test utilities without adopting a full application framework.
+
+## Documents
+
+- [specification.md](./specification.md) - public behavior, goals, and non-goals.
+- [architecture.md](./architecture.md) - module structure, data flow, and extension rules.
 
 ## What's in the box
 
-| Module | Provides | Consumer |
-|---|---|---|
-| `events` | Typed `AppEvent<UserEvent>` categories + unified channel: input, terminal, scheduler, watcher, user events | c4tui |
-| `component` | `Component` / `BufferComponent` traits, `ComponentId`, dirty-state invalidation, `Cached<C>` buffer caching | c4tui (`ViewPicker`) |
-| `elements` | First-class buffer-rendered `Element`s, decorators, `Text`, `Panel`, `Window`, `Stack`, overlays, and typed terminal effects | c4tui migration target |
-| `focus` | `FocusManager` with stack-based modal/capturing scopes; `active_scope_id()` for distinguishing modal scopes | c4tui (modal stack) |
-| `input` | `Key` enum mapped from crossterm events | c4tui |
-| `input_thread` | Detached input thread that pushes `InputEvent::Key` and `TerminalEvent::Resize` into the unified channel | c4tui |
-| `keymap` | `KeyMap<C>` registry generic over command type, `KeyTrigger → C` declarative bindings, last-binding-wins | c4tui (`KeyMap<PendingCommand>`) |
-| `tty` | `terminal_metrics()` reading both cell and pixel dimensions via TIOCGWINSZ | c4tui |
-| `image` | `KittyImageRegistry` + `ImageSurface` trait — transmit-once-place-many image lifecycle | c4tui |
-| `layout` | `PixelSize`, `CellSize`, `CanvasMetrics`, `ViewTransform`, `Placement`, `TailViewport` — fit/zoom/pan math plus consumer-backed tail-scroll viewport math | c4tui |
-| `bar` | `StatusFragment`, `SegmentSlot`, `layout_status_line` priority truncation | c4tui |
-| `scheduler` | Priority-queue task scheduler with custom-priority generic, scoped cancellation, machine-readable queue/timing stats | c4tui |
-| `watcher` | notify-based file watcher with debounce, emits `WatcherEvent::WorkspaceChanged` | c4tui |
-| `widgets::dialog` | `Dialog` widget for bordered modal text rendering | c4tui |
-| `widgets::grid` | Selectable/grid collection renderer with local cell canvases, active/selected styling, keyboard navigation, and scroll indicators | c4tui picker migration target |
-| `widgets::image_box` | `ImageBox`, `ImageBoxState`, and `ImageBoxPlan` — common image viewport: source dimensions, zoom, crop, optional border/title | image-box tests / visual test |
-| `terminal` | `Terminal` wrapping `ratatui::Terminal<CrosstermBackend>` + image registry + raw-mode lifecycle | c4tui |
-| `testkit` | Widget buffer rendering helpers, typed event scripts, mock image surface, `DeterministicScheduler` | tests/parity.rs |
+| Module | Provides |
+|---|---|
+| `events` | Typed `AppEvent<UserEvent>` categories + unified channel: input, terminal, scheduler, watcher, user events |
+| `component` | `Component` / `BufferComponent` traits, `ComponentId`, dirty-state invalidation, `Cached<C>` buffer caching |
+| `elements` | First-class buffer-rendered `Element`s, decorators, `Text`, `Panel`, `Window`, `Stack`, overlays, and typed terminal effects |
+| `focus` | `FocusManager` with stack-based modal/capturing scopes; `active_scope_id()` for distinguishing modal scopes |
+| `input` | `Key` enum mapped from crossterm events |
+| `input_thread` | Detached input thread that pushes `InputEvent::Key` and `TerminalEvent::Resize` into the unified channel |
+| `keymap` | `KeyMap<C>` registry generic over command type, `KeyTrigger -> C` declarative bindings, last-binding-wins |
+| `tty` | `terminal_metrics()` reading both cell and pixel dimensions via TIOCGWINSZ |
+| `image` | `KittyImageRegistry` + `ImageSurface` trait - transmit-once-place-many image lifecycle |
+| `layout` | `PixelSize`, `CellSize`, `CanvasMetrics`, `ViewTransform`, `Placement`, `TailViewport` - fit/zoom/pan math plus tail-scroll viewport math |
+| `bar` | `StatusFragment`, `SegmentSlot`, `layout_status_line` priority truncation |
+| `scheduler` | Priority-queue task scheduler with custom-priority generic, scoped cancellation, machine-readable queue/timing stats |
+| `watcher` | notify-based file watcher with debounce, emits `WatcherEvent::WorkspaceChanged` |
+| `widgets::dialog` | `Dialog` widget for bordered modal text rendering |
+| `widgets::grid` | Selectable/grid collection renderer with local cell canvases, active/selected styling, keyboard navigation, and scroll indicators |
+| `widgets::image_box` | `ImageBox`, `ImageBoxState`, and `ImageBoxPlan` - common image viewport: source dimensions, zoom, crop, optional border/title |
+| `terminal` | `Terminal` wrapping `ratatui::Terminal<CrosstermBackend>` + image registry + raw-mode lifecycle |
+| `testkit` | Widget buffer rendering helpers, typed event scripts, mock image surface, `DeterministicScheduler` |
 
 ## Element composition
 
@@ -119,19 +124,20 @@ cargo run --offline
 
 ## Removed pending consumer demand
 
-These public surfaces were pruned after the c4tui migration showed no real consumer. Reintroduce any of them only with a named consumer in the same change set.
+These public surfaces were pruned after they showed no durable consumer demand. Reintroduce any of them only with a named consumer in the same change set.
 
-- `widgets::picker`: c4tui uses its own app-specific `ViewPicker`; no real consumer validated the generic picker API.
-- `widgets::dialog` modal state/config/actions: c4tui only consumes the presentational `Dialog` widget.
-- `bar::Segment<Ctx>` / `SegmentBar<Ctx>` registry: c4tui consumes `StatusFragment`, `SegmentSlot`, and `layout_status_line`; app-owned segment traits fit borrowed status contexts better.
-- Generic focus traversal: c4tui consumes modal scope/capture only.
+- `widgets::picker`: no real consumer validated the generic picker API.
+- `widgets::dialog` modal state/config/actions: the presentational `Dialog` widget is the reusable part.
+- `bar::Segment<Ctx>` / `SegmentBar<Ctx>` registry: app-owned segment traits fit borrowed status contexts better.
+- Generic focus traversal: modal and capturing scopes are the validated reusable
+  pieces today.
 
 ## Out of scope (today)
 
 - Image surfaces other than Kitty graphics (Sixel, iTerm2)
-- Async runtimes (tokio/async-std) — uses sync threads + channels
+- Async runtimes (tokio/async-std) - uses sync threads + channels
 - Full component tree runtime orchestration
-- Generic focus traversal, theming, additional widgets (list/table/tree/tabs), runtime config bundles, subscription primitives, periodic tick producers — all deliberately removed pending consumer demand
+- Generic focus traversal, theming, additional widgets (list/table/tree/tabs), runtime config bundles, subscription primitives, periodic tick producers - all deliberately removed pending consumer demand
 
 ## License
 
