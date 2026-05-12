@@ -10,8 +10,8 @@
 
 pub use crate::bar::{SegmentSlot, StatusFragment};
 pub use crate::component::{
-    BufferComponent, Cached, CachedRenderStats, Component, ComponentChildren, ComponentId,
-    ComponentOutcome, DirtyReason, DirtyState,
+    BufferComponent, Cached, CachedRenderStats, ComponentChildren, ComponentId, ComponentOutcome,
+    DirtyReason, DirtyState,
 };
 pub use crate::config::{ConfigError, Validate};
 pub use crate::elements::{
