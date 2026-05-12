@@ -171,38 +171,6 @@ impl<Message> ComponentOutcome<Message> {
 /// Lightweight child list for component tree inspection.
 pub type ComponentChildren<'a> = &'a [ComponentId];
 
-/// Optional trait for reusable UI mechanics.
-///
-/// Rendering remains ratatui-native. Apps may ignore this trait entirely and
-/// continue to draw directly when a retained component model is not useful.
-pub trait Component {
-    type Event;
-    type Message;
-
-    fn id(&self) -> &ComponentId;
-
-    fn render(&mut self, frame: &mut ratatui::Frame<'_>, area: Rect) -> anyhow::Result<()>;
-
-    fn handle_event(
-        &mut self,
-        event: &Self::Event,
-    ) -> anyhow::Result<ComponentOutcome<Self::Message>>;
-
-    fn dirty(&self) -> &DirtyState;
-
-    fn mark_dirty(&mut self, reason: DirtyReason);
-
-    fn clear_dirty(&mut self);
-
-    fn focus_node(&self) -> Option<FocusNode> {
-        None
-    }
-
-    fn children(&self) -> ComponentChildren<'_> {
-        &[]
-    }
-}
-
 /// Buffer-native component shape used by [`Cached`].
 ///
 /// Most components should implement [`Component`] directly. Implement this
@@ -366,50 +334,6 @@ where
     }
 }
 
-impl<C> Component for Cached<C>
-where
-    C: BufferComponent,
-{
-    type Event = C::Event;
-    type Message = C::Message;
-
-    fn id(&self) -> &ComponentId {
-        self.inner.id()
-    }
-
-    fn render(&mut self, frame: &mut ratatui::Frame<'_>, area: Rect) -> anyhow::Result<()> {
-        self.render_to_buffer(area, frame.buffer_mut())
-    }
-
-    fn handle_event(
-        &mut self,
-        event: &Self::Event,
-    ) -> anyhow::Result<ComponentOutcome<Self::Message>> {
-        self.inner.handle_event(event)
-    }
-
-    fn dirty(&self) -> &DirtyState {
-        self.inner.dirty()
-    }
-
-    fn mark_dirty(&mut self, reason: DirtyReason) {
-        self.invalidate();
-        self.inner.mark_dirty(reason);
-    }
-
-    fn clear_dirty(&mut self) {
-        self.inner.clear_dirty();
-    }
-
-    fn focus_node(&self) -> Option<FocusNode> {
-        self.inner.focus_node()
-    }
-
-    fn children(&self) -> ComponentChildren<'_> {
-        self.inner.children()
-    }
-}
-
 fn blit(source: &Buffer, target: &mut Buffer) {
     let area = *source.area();
     for y in area.y..area.y.saturating_add(area.height) {
@@ -542,7 +466,7 @@ mod tests {
         let mut target = Buffer::empty(larger);
 
         cached.render_to_buffer(area, &mut target)?;
-        cached.mark_dirty(DirtyReason::DataUpdate);
+        cached.inner_mut().mark_dirty(DirtyReason::DataUpdate);
         cached.render_to_buffer(area, &mut target)?;
         cached.render_to_buffer(larger, &mut target)?;
 
