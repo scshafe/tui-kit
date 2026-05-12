@@ -1,7 +1,11 @@
-//! Keyboard and mouse abstraction. [`Key`] is the unified input enum
-//! delivered to applications via [`crate::events::InputEvent::Key`].
+//! Keyboard, mouse, and window-resize abstraction.
 //!
-//! [`read_key`] blocks on the next crossterm event and translates it.
+//! Three types form the input surface:
+//! - [`KeyEvent`]: keyboard-only events (characters, navigation, modifiers).
+//! - [`MouseEvent`]: mouse-only events (clicks, drags, wheel, release).
+//! - [`InputEvent`]: the union of the two plus window-resize.
+//!
+//! [`read_input_event`] blocks on the next crossterm event and translates it.
 //! Designed to be called from the dedicated input thread spawned by
 //! [`crate::input_thread::spawn`].
 //!
@@ -11,12 +15,13 @@
 
 use anyhow::Result;
 use crossterm::event::{
-    self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers, MouseButton, MouseEvent,
-    MouseEventKind,
+    self, Event, KeyCode, KeyEvent as CtKeyEvent, KeyEventKind, KeyModifiers,
+    MouseButton, MouseEvent as CtMouseEvent, MouseEventKind,
 };
 
+/// Keyboard input. Mouse and resize events live in their own enums.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Key {
+pub enum KeyEvent {
     Char(char),
     Up,
     Down,
@@ -27,81 +32,100 @@ pub enum Key {
     Back,
     Esc,
     CtrlC,
-    MouseClick { x: u16, y: u16 },
-    MouseWheelUp { x: u16, y: u16 },
-    MouseWheelDown { x: u16, y: u16 },
-    MouseDrag { x: u16, y: u16 },
-    MouseRelease,
-    Resize { cols: u16, rows: u16 },
     Unknown,
 }
 
-pub fn read_key() -> Result<Key> {
+/// Mouse input in terminal-cell coordinates (1-indexed; the input thread adds
+/// one to crossterm's 0-indexed columns and rows on translation). Conversion to
+/// any normalized "canvas" coordinate system is the consumer's responsibility:
+/// tui-kit owns terminal cells, not canvases.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MouseEvent {
+    Click { x: u16, y: u16 },
+    Drag { x: u16, y: u16 },
+    WheelUp { x: u16, y: u16 },
+    WheelDown { x: u16, y: u16 },
+    Release,
+}
+
+/// Union of every input event the producer can deliver.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum InputEvent {
+    Key(KeyEvent),
+    Mouse(MouseEvent),
+    Resize { cols: u16, rows: u16 },
+}
+
+pub fn read_input_event() -> Result<InputEvent> {
     loop {
         let event = event::read()?;
-        if let Some(key) = translate_event(event) {
-            return Ok(key);
+        if let Some(input) = translate_event(event) {
+            return Ok(input);
         }
     }
 }
 
-fn translate_event(event: Event) -> Option<Key> {
+fn translate_event(event: Event) -> Option<InputEvent> {
     match event {
-        Event::Key(key_event) => translate_key_event(key_event),
-        Event::Mouse(mouse) => Some(translate_mouse(mouse)),
-        Event::Resize(cols, rows) => Some(Key::Resize { cols, rows }),
+        Event::Key(ct) => translate_key_event(ct).map(InputEvent::Key),
+        Event::Mouse(ct) => Some(InputEvent::Mouse(translate_mouse(ct))),
+        Event::Resize(cols, rows) => Some(InputEvent::Resize { cols, rows }),
         _ => None,
     }
 }
 
-fn translate_key_event(event: KeyEvent) -> Option<Key> {
+fn translate_key_event(event: CtKeyEvent) -> Option<KeyEvent> {
     if event.kind == KeyEventKind::Release {
         return None;
     }
     Some(match (event.code, event.modifiers) {
-        (KeyCode::Char('c'), m) if m.contains(KeyModifiers::CONTROL) => Key::CtrlC,
-        (KeyCode::Char('C'), m) if m.contains(KeyModifiers::CONTROL) => Key::CtrlC,
-        (KeyCode::Char(c), _) => Key::Char(c),
-        (KeyCode::Up, _) => Key::Up,
-        (KeyCode::Down, _) => Key::Down,
-        (KeyCode::Left, _) => Key::Left,
-        (KeyCode::Right, _) => Key::Right,
-        (KeyCode::Enter, _) => Key::Enter,
-        (KeyCode::Tab, _) => Key::Tab,
-        (KeyCode::BackTab, _) => Key::Tab,
-        (KeyCode::Backspace, _) => Key::Back,
-        (KeyCode::Esc, _) => Key::Esc,
-        _ => Key::Unknown,
+        (KeyCode::Char('c'), m) if m.contains(KeyModifiers::CONTROL) => KeyEvent::CtrlC,
+        (KeyCode::Char('C'), m) if m.contains(KeyModifiers::CONTROL) => KeyEvent::CtrlC,
+        (KeyCode::Char(c), _) => KeyEvent::Char(c),
+        (KeyCode::Up, _) => KeyEvent::Up,
+        (KeyCode::Down, _) => KeyEvent::Down,
+        (KeyCode::Left, _) => KeyEvent::Left,
+        (KeyCode::Right, _) => KeyEvent::Right,
+        (KeyCode::Enter, _) => KeyEvent::Enter,
+        (KeyCode::Tab, _) => KeyEvent::Tab,
+        (KeyCode::BackTab, _) => KeyEvent::Tab,
+        (KeyCode::Backspace, _) => KeyEvent::Back,
+        (KeyCode::Esc, _) => KeyEvent::Esc,
+        _ => KeyEvent::Unknown,
     })
 }
 
-fn translate_mouse(event: MouseEvent) -> Key {
+fn translate_mouse(event: CtMouseEvent) -> MouseEvent {
     let x = event.column.saturating_add(1);
     let y = event.row.saturating_add(1);
     match event.kind {
-        MouseEventKind::Down(MouseButton::Left) => Key::MouseClick { x, y },
-        MouseEventKind::Drag(MouseButton::Left) => Key::MouseDrag { x, y },
-        MouseEventKind::Up(_) => Key::MouseRelease,
-        MouseEventKind::ScrollUp => Key::MouseWheelUp { x, y },
-        MouseEventKind::ScrollDown => Key::MouseWheelDown { x, y },
-        _ => Key::Unknown,
+        MouseEventKind::Down(MouseButton::Left) => MouseEvent::Click { x, y },
+        MouseEventKind::Drag(MouseButton::Left) => MouseEvent::Drag { x, y },
+        MouseEventKind::Up(_) => MouseEvent::Release,
+        MouseEventKind::ScrollUp => MouseEvent::WheelUp { x, y },
+        MouseEventKind::ScrollDown => MouseEvent::WheelDown { x, y },
+        // Mouse events we don't currently route (e.g. right-button drag,
+        // middle button) collapse into a synthetic Release. Equivalent to the
+        // pre-split behaviour of returning `Key::Unknown` and letting consumers
+        // ignore it.
+        _ => MouseEvent::Release,
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crossterm::event::{KeyEvent, KeyModifiers};
+    use crossterm::event::{KeyEvent as CtKeyEvent, KeyModifiers};
 
     #[test]
     fn ctrl_c_translates_to_ctrl_c() {
-        let event = KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL);
-        assert_eq!(translate_key_event(event), Some(Key::CtrlC));
+        let event = CtKeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL);
+        assert_eq!(translate_key_event(event), Some(KeyEvent::CtrlC));
     }
 
     #[test]
     fn release_events_are_filtered() {
-        let mut event = KeyEvent::new(KeyCode::Char('q'), KeyModifiers::NONE);
+        let mut event = CtKeyEvent::new(KeyCode::Char('q'), KeyModifiers::NONE);
         event.kind = KeyEventKind::Release;
         assert_eq!(translate_key_event(event), None);
     }
@@ -109,24 +133,32 @@ mod tests {
     #[test]
     fn arrow_keys_translate() {
         for (code, expected) in [
-            (KeyCode::Up, Key::Up),
-            (KeyCode::Down, Key::Down),
-            (KeyCode::Left, Key::Left),
-            (KeyCode::Right, Key::Right),
+            (KeyCode::Up, KeyEvent::Up),
+            (KeyCode::Down, KeyEvent::Down),
+            (KeyCode::Left, KeyEvent::Left),
+            (KeyCode::Right, KeyEvent::Right),
         ] {
-            let event = KeyEvent::new(code, KeyModifiers::NONE);
+            let event = CtKeyEvent::new(code, KeyModifiers::NONE);
             assert_eq!(translate_key_event(event), Some(expected));
         }
     }
 
     #[test]
     fn mouse_click_adds_one_for_one_indexing() {
-        let event = MouseEvent {
+        let event = CtMouseEvent {
             kind: MouseEventKind::Down(MouseButton::Left),
             column: 9,
             row: 19,
             modifiers: KeyModifiers::NONE,
         };
-        assert_eq!(translate_mouse(event), Key::MouseClick { x: 10, y: 20 });
+        assert_eq!(translate_mouse(event), MouseEvent::Click { x: 10, y: 20 });
+    }
+
+    #[test]
+    fn translate_event_returns_resize_directly() {
+        assert_eq!(
+            translate_event(Event::Resize(120, 40)),
+            Some(InputEvent::Resize { cols: 120, rows: 40 })
+        );
     }
 }
