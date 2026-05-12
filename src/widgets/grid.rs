@@ -6,7 +6,7 @@
 //! need to know their absolute terminal row or column.
 
 use crate::component::ComponentOutcome;
-use crate::input::Key;
+use crate::input::KeyEvent;
 use crate::layout::CellArea;
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
@@ -185,7 +185,7 @@ impl Grid {
 
     pub fn handle_key(
         &mut self,
-        key: Key,
+        key: KeyEvent,
         viewport_width: u16,
         item_count: usize,
     ) -> GridInputOutcome {
@@ -195,8 +195,8 @@ impl Grid {
             return GridInputOutcome::Ignored;
         }
 
-        let Some(direction) = GridNavigation::from_key(key) else {
-            if key == Key::Enter {
+        let Some(direction) = GridNavigation::from_key_event(key) else {
+            if key == KeyEvent::Enter {
                 return match self.select_active() {
                     Some(index) => GridInputOutcome::Selected(index),
                     None => GridInputOutcome::Ignored,
@@ -212,7 +212,7 @@ impl Grid {
 
     pub fn handle_key_as_component_outcome(
         &mut self,
-        key: Key,
+        key: KeyEvent,
         viewport_width: u16,
         item_count: usize,
     ) -> ComponentOutcome<GridInputOutcome> {
@@ -555,12 +555,12 @@ pub enum GridNavigation {
 }
 
 impl GridNavigation {
-    pub fn from_key(key: Key) -> Option<Self> {
+    pub fn from_key_event(key: KeyEvent) -> Option<Self> {
         Some(match key {
-            Key::Up => Self::Up,
-            Key::Down => Self::Down,
-            Key::Left => Self::Left,
-            Key::Right => Self::Right,
+            KeyEvent::Up => Self::Up,
+            KeyEvent::Down => Self::Down,
+            KeyEvent::Left => Self::Left,
+            KeyEvent::Right => Self::Right,
             _ => return None,
         })
     }
@@ -725,7 +725,7 @@ mod tests {
 
         assert_eq!(state, GridRenderState::default());
         assert_eq!(
-            grid.handle_key(Key::Enter, 10, items.len()),
+            grid.handle_key(KeyEvent::Enter, 10, items.len()),
             GridInputOutcome::Ignored
         );
         assert_eq!(grid.active_index(), None);
@@ -874,11 +874,11 @@ mod tests {
         assert_eq!(state.columns, 1);
         assert_eq!(state.visible_cells[1].row, 1);
         assert_eq!(
-            grid.handle_key(Key::Down, 10, items.len()),
+            grid.handle_key(KeyEvent::Down, 10, items.len()),
             GridInputOutcome::Moved(1)
         );
         assert_eq!(
-            grid.handle_key(Key::Right, 10, items.len()),
+            grid.handle_key(KeyEvent::Right, 10, items.len()),
             GridInputOutcome::Moved(1)
         );
     }
@@ -906,14 +906,14 @@ mod tests {
         let mut grid = Grid::new().with_columns(3).with_active_index(Some(2));
 
         assert_eq!(
-            grid.handle_key(Key::Right, 30, 5),
+            grid.handle_key(KeyEvent::Right, 30, 5),
             GridInputOutcome::Moved(2)
         );
         assert_eq!(grid.active_index(), Some(2));
 
         grid = grid.with_active_index(Some(3));
         assert_eq!(
-            grid.handle_key(Key::Left, 30, 5),
+            grid.handle_key(KeyEvent::Left, 30, 5),
             GridInputOutcome::Moved(3)
         );
         assert_eq!(grid.active_index(), Some(3));
@@ -1005,19 +1005,19 @@ mod tests {
             .with_wrap_navigation(true);
 
         assert_eq!(
-            grid.handle_key(Key::Right, 30, 5),
+            grid.handle_key(KeyEvent::Right, 30, 5),
             GridInputOutcome::Moved(1)
         );
         assert_eq!(
-            grid.handle_key(Key::Down, 30, 5),
+            grid.handle_key(KeyEvent::Down, 30, 5),
             GridInputOutcome::Moved(4)
         );
         assert_eq!(
-            grid.handle_key(Key::Right, 30, 5),
+            grid.handle_key(KeyEvent::Right, 30, 5),
             GridInputOutcome::Moved(0)
         );
         assert_eq!(
-            grid.handle_key(Key::Enter, 30, 5),
+            grid.handle_key(KeyEvent::Enter, 30, 5),
             GridInputOutcome::Selected(0)
         );
         assert_eq!(grid.selected_index(), Some(0));
