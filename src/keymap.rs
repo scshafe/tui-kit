@@ -82,7 +82,9 @@ impl KeyTrigger {
     pub fn matches(self, key: KeyEvent) -> bool {
         match (self, key) {
             (Self::Char(want), KeyEvent::Char(got)) => want == got,
-            (Self::CharCaseInsensitive(want), KeyEvent::Char(got)) => want.eq_ignore_ascii_case(&got),
+            (Self::CharCaseInsensitive(want), KeyEvent::Char(got)) => {
+                want.eq_ignore_ascii_case(&got)
+            }
             (Self::Special(want), key) => SpecialKey::from_key_event(key) == Some(want),
             _ => false,
         }

@@ -15,8 +15,8 @@
 
 use anyhow::Result;
 use crossterm::event::{
-    self, Event, KeyCode, KeyEvent as CtKeyEvent, KeyEventKind, KeyModifiers,
-    MouseButton, MouseEvent as CtMouseEvent, MouseEventKind,
+    self, Event, KeyCode, KeyEvent as CtKeyEvent, KeyEventKind, KeyModifiers, MouseButton,
+    MouseEvent as CtMouseEvent, MouseEventKind,
 };
 
 /// Keyboard input. Mouse and resize events live in their own enums.
@@ -150,7 +150,10 @@ mod tests {
             row: 19,
             modifiers: KeyModifiers::NONE,
         };
-        assert_eq!(translate_mouse(event), Some(MouseEvent::Click { x: 10, y: 20 }));
+        assert_eq!(
+            translate_mouse(event),
+            Some(MouseEvent::Click { x: 10, y: 20 })
+        );
     }
 
     #[test]
@@ -168,7 +171,10 @@ mod tests {
     fn translate_event_returns_resize_directly() {
         assert_eq!(
             translate_event(Event::Resize(120, 40)),
-            Some(InputEvent::Resize { cols: 120, rows: 40 })
+            Some(InputEvent::Resize {
+                cols: 120,
+                rows: 40
+            })
         );
     }
 }
