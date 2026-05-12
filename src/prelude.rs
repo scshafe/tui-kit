@@ -4,22 +4,22 @@
 //! use tui_kit::prelude::*;
 //! ```
 //!
-//! Test harness helpers stay under [`crate::testkit`] instead of the prelude so
-//! application imports do not accidentally couple runtime code to test-only
-//! surfaces.
+//! Scope: constructors and traits an app reaches for at the import line, plus
+//! the small set of return/state types those constructors hand back. Internal
+//! state, configuration, placement, and error types live behind their module
+//! paths (`tui_kit::widgets::image_box::*`, `tui_kit::layout::*`,
+//! `tui_kit::widgets::image_viewport::*`) so glob-importing the prelude does
+//! not pollute consumer namespaces with policy enums and error structs.
+//!
+//! Test harness helpers stay under [`crate::testkit`].
 
 pub use crate::bar::{SegmentSlot, StatusFragment};
 pub use crate::component::{
-    BufferComponent, Cached, CachedRenderStats, ComponentChildren, ComponentId, ComponentOutcome,
-    DirtyReason, DirtyState,
+    BufferComponent, Cached, ComponentChildren, ComponentId, ComponentOutcome, DirtyReason,
+    DirtyState,
 };
-pub use crate::config::{ConfigError, Validate};
 pub use crate::elements::{
-    Bordered, ContainerElement, EffectElement, Element, ElementBorder, ElementExt, ElementOutcome,
-    Focusable, ImageViewportElement, KeyResolution, KeyScope, KeyScopeResolver, KeyScopeRole,
-    Modal, Overlay, Padded, Padding, Panel, ScrollY, Stack, StackConstraint, StackDirection,
-    TerminalEffect, Text, TextOverflow, Window, WindowChrome, WindowFocusScope,
-    WindowLifecycleEvent, WindowRenderStats, WindowRepaintPolicy,
+    EffectElement, Element, ElementExt, ElementOutcome, ImageViewportElement,
 };
 pub use crate::events::{
     AppEvent, AppEventReceiver, AppEventSender, InputEvent, SchedulerEvent, TerminalEvent,
@@ -34,10 +34,8 @@ pub use crate::image::{
 pub use crate::input::Key;
 pub use crate::keymap::{KeyBinding, KeyMap, KeyTrigger, SpecialKey};
 pub use crate::layout::{
-    fit_scale, CanvasMetrics, CellArea, CellOffset, CellPixel, CellRect, CellRoundingPolicy,
-    CellSize, ClippedSides, ImageAnchorPolicy, ImageOverflowPolicy, ImagePoint, ImageScaleBasis,
-    ImageZoomLimitPolicy, PixelRect, PixelSize, Placement, PlacementAnchor, PlacementEngine,
-    PlacementPolicy, TailViewport, ViewTransform, MAX_SCALE, MIN_SCALE,
+    fit_scale, CanvasMetrics, CellArea, CellOffset, CellPixel, CellRect, CellSize, PixelRect,
+    PixelSize, Placement, PlacementEngine, MAX_SCALE, MIN_SCALE,
 };
 pub use crate::scheduler::{
     CancellationReport, Completion, Priority, Progress, RequestScope, Scheduler, SchedulerStats,
@@ -47,15 +45,9 @@ pub use crate::tty::{stdin_is_terminal, stdout_is_terminal, terminal_metrics, wr
 pub use crate::watcher::WorkspaceWatcher;
 pub use crate::widgets::dialog::Dialog;
 pub use crate::widgets::grid::{
-    Grid, GridCell, GridCellCanvas, GridCellPlacement, GridColumnMode, GridInputOutcome,
-    GridNavigation, GridRenderState, GridStyle,
+    Grid, GridCell, GridCellPlacement, GridColumnMode, GridNavigation, GridStyle,
 };
-pub use crate::widgets::image_box::{
-    ImageBox, ImageBoxPlacement, ImageBoxPlan, ImageBoxState, ImageBoxStyle,
-};
+pub use crate::widgets::image_box::{ImageBox, ImageBoxPlan, ImageBoxState};
 pub use crate::widgets::image_viewport::{
-    CanvasUpdate, ImageScale, ImageViewport, ImageViewportError, ImageViewportInitialScale,
-    ImageViewportOptions, ImageViewportPlacement, ImageViewportWidget, PixelDistance, PixelExtent,
-    ResizePolicy, RgbaImage, ScaleBasis, ScaledPixelOffset, StepDirection, UnscaledPixelOffset,
-    ViewportAxis, ViewportImage, ZoomDirection, ZoomFactor,
+    ImageScale, ImageViewport, ImageViewportOptions, ImageViewportWidget,
 };
