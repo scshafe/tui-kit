@@ -238,6 +238,46 @@ pub trait BufferComponent {
     }
 }
 
+impl<E, M> BufferComponent for Box<dyn BufferComponent<Event = E, Message = M>> {
+    type Event = E;
+    type Message = M;
+
+    fn id(&self) -> &ComponentId {
+        self.as_ref().id()
+    }
+
+    fn render_buffer(&mut self, area: Rect, buffer: &mut Buffer) -> anyhow::Result<()> {
+        self.as_mut().render_buffer(area, buffer)
+    }
+
+    fn handle_event(
+        &mut self,
+        event: &Self::Event,
+    ) -> anyhow::Result<ComponentOutcome<Self::Message>> {
+        self.as_mut().handle_event(event)
+    }
+
+    fn dirty(&self) -> &DirtyState {
+        self.as_ref().dirty()
+    }
+
+    fn mark_dirty(&mut self, reason: DirtyReason) {
+        self.as_mut().mark_dirty(reason);
+    }
+
+    fn clear_dirty(&mut self) {
+        self.as_mut().clear_dirty();
+    }
+
+    fn focus_node(&self) -> Option<FocusNode> {
+        self.as_ref().focus_node()
+    }
+
+    fn children(&self) -> ComponentChildren<'_> {
+        self.as_ref().children()
+    }
+}
+
 /// Machine-readable render cache counters for [`Cached`].
 ///
 /// `cache_misses` counts inner-component renders that populated the cache.
@@ -510,6 +550,31 @@ mod tests {
         assert_eq!(cached.stats().cache_misses, 3);
         assert_eq!(cached.stats().cache_hits, 0);
         assert_eq!(cached.cached_area(), Some(larger));
+        Ok(())
+    }
+
+    #[test]
+    fn boxed_buffer_component_forwards_trait_methods() -> anyhow::Result<()> {
+        let area = Rect::new(0, 0, 1, 1);
+        fn assert_buffer_component<T: BufferComponent>(_t: &T) {}
+        let mut boxed: Box<dyn BufferComponent<Event = (), Message = ()>> =
+            Box::new(CountingBufferComponent::new());
+        assert_buffer_component(&boxed);
+
+        assert_eq!(boxed.id().as_str(), "counter");
+        assert!(!boxed.dirty().is_clean());
+
+        let mut buffer = Buffer::empty(area);
+        boxed.render_buffer(area, &mut buffer)?;
+        boxed.clear_dirty();
+        assert!(boxed.dirty().is_clean());
+
+        boxed.mark_dirty(DirtyReason::Input);
+        assert!(!boxed.dirty().is_clean());
+
+        let outcome = boxed.handle_event(&())?;
+        assert!(matches!(outcome, ComponentOutcome::Ignored));
+
         Ok(())
     }
 }
