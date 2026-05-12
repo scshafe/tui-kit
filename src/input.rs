@@ -56,6 +56,9 @@ pub enum InputEvent {
     Resize { cols: u16, rows: u16 },
 }
 
+/// Blocks until the next crossterm event translates to an [`InputEvent`].
+/// Events that translate to `None` (key releases, unmapped mouse events,
+/// platform-specific events we don't care about) are silently skipped.
 pub fn read_input_event() -> Result<InputEvent> {
     loop {
         let event = event::read()?;
@@ -68,7 +71,7 @@ pub fn read_input_event() -> Result<InputEvent> {
 fn translate_event(event: Event) -> Option<InputEvent> {
     match event {
         Event::Key(ct) => translate_key_event(ct).map(InputEvent::Key),
-        Event::Mouse(ct) => Some(InputEvent::Mouse(translate_mouse(ct))),
+        Event::Mouse(ct) => translate_mouse(ct).map(InputEvent::Mouse),
         Event::Resize(cols, rows) => Some(InputEvent::Resize { cols, rows }),
         _ => None,
     }
@@ -95,21 +98,17 @@ fn translate_key_event(event: CtKeyEvent) -> Option<KeyEvent> {
     })
 }
 
-fn translate_mouse(event: CtMouseEvent) -> MouseEvent {
+fn translate_mouse(event: CtMouseEvent) -> Option<MouseEvent> {
     let x = event.column.saturating_add(1);
     let y = event.row.saturating_add(1);
-    match event.kind {
+    Some(match event.kind {
         MouseEventKind::Down(MouseButton::Left) => MouseEvent::Click { x, y },
         MouseEventKind::Drag(MouseButton::Left) => MouseEvent::Drag { x, y },
         MouseEventKind::Up(_) => MouseEvent::Release,
         MouseEventKind::ScrollUp => MouseEvent::WheelUp { x, y },
         MouseEventKind::ScrollDown => MouseEvent::WheelDown { x, y },
-        // Mouse events we don't currently route (e.g. right-button drag,
-        // middle button) collapse into a synthetic Release. Equivalent to the
-        // pre-split behaviour of returning `Key::Unknown` and letting consumers
-        // ignore it.
-        _ => MouseEvent::Release,
-    }
+        _ => return None,
+    })
 }
 
 #[cfg(test)]
@@ -151,7 +150,18 @@ mod tests {
             row: 19,
             modifiers: KeyModifiers::NONE,
         };
-        assert_eq!(translate_mouse(event), MouseEvent::Click { x: 10, y: 20 });
+        assert_eq!(translate_mouse(event), Some(MouseEvent::Click { x: 10, y: 20 }));
+    }
+
+    #[test]
+    fn unmapped_mouse_events_translate_to_none() {
+        let event = CtMouseEvent {
+            kind: MouseEventKind::Down(MouseButton::Right),
+            column: 5,
+            row: 5,
+            modifiers: KeyModifiers::NONE,
+        };
+        assert_eq!(translate_mouse(event), None);
     }
 
     #[test]
