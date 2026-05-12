@@ -22,8 +22,7 @@ pub use crate::elements::{
     EffectElement, Element, ElementExt, ElementOutcome, ImageViewportElement,
 };
 pub use crate::events::{
-    AppEvent, AppEventReceiver, AppEventSender, InputEvent, SchedulerEvent, TerminalEvent,
-    WatcherEvent,
+    AppEvent, AppEventReceiver, AppEventSender, SchedulerEvent, TerminalEvent, WatcherEvent,
 };
 pub use crate::focus::{FocusConfig, FocusId, FocusManager, FocusNode, FocusScopeKind};
 pub use crate::image::{
@@ -31,7 +30,7 @@ pub use crate::image::{
     ImageSurfaceRegistry, KittyImageRegistry, NoopImageSurface, PlaceOptions, TransparencySupport,
     MAIN_PLACEMENT_ID, PICKER_PLACEMENT_ID_BASE,
 };
-pub use crate::input::Key;
+pub use crate::input::{InputEvent, KeyEvent, MouseEvent};
 pub use crate::keymap::{KeyBinding, KeyMap, KeyTrigger, SpecialKey};
 pub use crate::layout::{
     fit_scale, CanvasMetrics, CellArea, CellOffset, CellPixel, CellRect, CellSize, PixelRect,

@@ -7,19 +7,19 @@
 //! but does not interpret commands or own the app loop.
 
 use crate::events::{AppEvent, AppEventSender};
-use crate::input::{read_key, Key};
+use crate::input::{read_input_event, InputEvent};
 use std::thread;
 
 pub fn spawn(sink: AppEventSender) -> thread::JoinHandle<()> {
     thread::spawn(move || loop {
-        match read_key() {
-            Ok(Key::Resize { cols, rows }) => {
+        match read_input_event() {
+            Ok(InputEvent::Resize { cols, rows }) => {
                 if sink.send(AppEvent::terminal_resize(cols, rows)).is_err() {
                     return;
                 }
             }
-            Ok(key) => {
-                if sink.send(AppEvent::input_key(key)).is_err() {
+            Ok(input) => {
+                if sink.send(AppEvent::Input(input)).is_err() {
                     return;
                 }
             }

@@ -6,17 +6,17 @@
 //! [`AppEventReceiver`].
 //!
 //! Scheduler completions are signalled by [`AppEvent::Scheduler`] carrying a
-//! [`SchedulerEvent::Complete`] wake-up. The
-//! scheduler buffers completion data internally; the app drains it via the
-//! scheduler's own API. This keeps event delivery unified without letting the
-//! top-level event enum become an unstructured junk drawer.
+//! [`SchedulerEvent::Complete`] wake-up. The scheduler buffers completion data
+//! internally; the app drains it via the scheduler's own API. This keeps event
+//! delivery unified without letting the top-level event enum become an
+//! unstructured junk drawer.
 //!
 //! **Stability:** consumed by c4tui's main loop and producer tests. The
 //! categorized `AppEvent<UserEvent>` shape is kept because the c4tui migration
 //! validated it; new event categories should arrive with a producer and a real
 //! consumer in the same change set.
 
-use crate::input::Key;
+use crate::input::{InputEvent, KeyEvent};
 use std::convert::Infallible;
 use std::sync::mpsc::{Receiver, Sender};
 
@@ -28,12 +28,6 @@ pub enum AppEvent<UserEvent = Infallible> {
     Scheduler(SchedulerEvent),
     Watcher(WatcherEvent),
     User(UserEvent),
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[non_exhaustive]
-pub enum InputEvent {
-    Key(Key),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -55,7 +49,7 @@ pub enum WatcherEvent {
 }
 
 impl<UserEvent> AppEvent<UserEvent> {
-    pub fn input_key(key: Key) -> Self {
+    pub fn input_key(key: KeyEvent) -> Self {
         Self::Input(InputEvent::Key(key))
     }
 
@@ -82,8 +76,8 @@ mod tests {
     #[test]
     fn constructors_keep_events_in_typed_categories() {
         assert_eq!(
-            AppEvent::<Infallible>::input_key(Key::Enter),
-            AppEvent::Input(InputEvent::Key(Key::Enter))
+            AppEvent::<Infallible>::input_key(KeyEvent::Enter),
+            AppEvent::Input(InputEvent::Key(KeyEvent::Enter))
         );
         assert_eq!(
             AppEvent::<Infallible>::terminal_resize(80, 24),

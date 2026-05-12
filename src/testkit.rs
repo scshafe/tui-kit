@@ -12,7 +12,7 @@
 
 use crate::events::AppEvent;
 use crate::image::{ImageCapabilities, ImageSurface, PlaceOptions};
-use crate::input::Key;
+use crate::input::KeyEvent;
 use crate::layout::PixelSize;
 use crate::scheduler::{CancellationReport, Completion, Priority, RequestScope};
 use anyhow::Result;
@@ -68,7 +68,7 @@ impl<UserEvent> EventScript<UserEvent> {
 
 impl EventScript<Infallible> {
     /// Build a script from keyboard mechanics only.
-    pub fn keys(keys: impl IntoIterator<Item = Key>) -> Self {
+    pub fn keys(keys: impl IntoIterator<Item = KeyEvent>) -> Self {
         Self::new(keys.into_iter().map(AppEvent::input_key))
     }
 
@@ -489,10 +489,10 @@ mod tests {
 
     #[test]
     fn event_script_keeps_typed_event_categories() {
-        let script = EventScript::keys([Key::Down, Key::Enter]);
+        let script = EventScript::keys([KeyEvent::Down, KeyEvent::Enter]);
 
-        assert_eq!(script.events()[0], AppEvent::input_key(Key::Down));
-        assert_eq!(script.events()[1], AppEvent::input_key(Key::Enter));
+        assert_eq!(script.events()[0], AppEvent::input_key(KeyEvent::Down));
+        assert_eq!(script.events()[1], AppEvent::input_key(KeyEvent::Enter));
     }
 
     #[test]
