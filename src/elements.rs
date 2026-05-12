@@ -15,7 +15,7 @@ use ratatui::style::Style;
 use ratatui::widgets::{Block, Borders, Widget};
 use serde::{Deserialize, Serialize};
 
-use crate::component::{ComponentChildren, ComponentId, ComponentOutcome, DirtyReason, DirtyState};
+use crate::component::{BufferComponent, ComponentChildren, ComponentId, ComponentOutcome, DirtyReason, DirtyState};
 use crate::focus::{FocusId, FocusNode, FocusScopeKind};
 use crate::image::{ImageSurface, ImageSurfaceRegistry, PlaceOptions};
 use crate::input::Key;
@@ -26,72 +26,17 @@ use crate::widgets::image_viewport::ImageViewportWidget;
 /// Alias retained so element event handlers read independently from components.
 pub type ElementOutcome<Message> = ComponentOutcome<Message>;
 
-/// Buffer-rendered UI object.
+/// Buffer-rendered UI object: a [`BufferComponent`] whose event type is keyboard input.
 ///
-/// Elements render into a caller-owned [`Buffer`]. Terminal side effects such
-/// as image placement stay outside this trait and are exposed through
-/// [`EffectElement`].
-pub trait Element {
-    type Message;
+/// `Element` is a marker subtrait. Every implementation is written as
+/// `impl BufferComponent for Foo` (with `type Event = Key;`), and the blanket
+/// impl below makes any such type automatically `Element`. The `Element` name
+/// remains useful in `dyn Element<Message = M>` and `impl Element<Message = M>`
+/// positions to express "buffer-rendered keyboard-driven UI object" without
+/// repeating the `BufferComponent<Event = Key>` bound at every call site.
+pub trait Element: BufferComponent<Event = Key> {}
 
-    fn id(&self) -> &ComponentId;
-
-    fn render(&mut self, area: Rect, buffer: &mut Buffer) -> Result<()>;
-
-    fn handle_key(&mut self, _key: Key) -> Result<ElementOutcome<Self::Message>> {
-        Ok(ComponentOutcome::Ignored)
-    }
-
-    fn dirty(&self) -> &DirtyState;
-
-    fn mark_dirty(&mut self, reason: DirtyReason);
-
-    fn clear_dirty(&mut self);
-
-    fn focus_node(&self) -> Option<FocusNode> {
-        None
-    }
-
-    fn children(&self) -> ComponentChildren<'_> {
-        &[]
-    }
-}
-
-impl<M> Element for Box<dyn Element<Message = M>> {
-    type Message = M;
-
-    fn id(&self) -> &ComponentId {
-        self.as_ref().id()
-    }
-
-    fn render(&mut self, area: Rect, buffer: &mut Buffer) -> Result<()> {
-        self.as_mut().render(area, buffer)
-    }
-
-    fn handle_key(&mut self, key: Key) -> Result<ElementOutcome<Self::Message>> {
-        self.as_mut().handle_key(key)
-    }
-
-    fn dirty(&self) -> &DirtyState {
-        self.as_ref().dirty()
-    }
-
-    fn mark_dirty(&mut self, reason: DirtyReason) {
-        self.as_mut().mark_dirty(reason);
-    }
-
-    fn clear_dirty(&mut self) {
-        self.as_mut().clear_dirty();
-    }
-
-    fn focus_node(&self) -> Option<FocusNode> {
-        self.as_ref().focus_node()
-    }
-
-    fn children(&self) -> ComponentChildren<'_> {
-        self.as_ref().children()
-    }
-}
+impl<T> Element for T where T: BufferComponent<Event = Key> {}
 
 /// Element with inspectable child membership.
 pub trait ContainerElement: Element {
@@ -417,14 +362,15 @@ impl Text {
     }
 }
 
-impl Element for Text {
+impl BufferComponent for Text {
+    type Event = Key;
     type Message = ();
 
     fn id(&self) -> &ComponentId {
         &self.id
     }
 
-    fn render(&mut self, area: Rect, buffer: &mut Buffer) -> Result<()> {
+    fn render_buffer(&mut self, area: Rect, buffer: &mut Buffer) -> Result<()> {
         buffer.set_style(area, self.style);
         render_text_lines(
             &self.text,
@@ -603,25 +549,26 @@ impl<E: Element> Panel<E> {
     }
 }
 
-impl<E: Element> Element for Panel<E> {
+impl<E: Element> BufferComponent for Panel<E> {
+    type Event = Key;
     type Message = E::Message;
 
     fn id(&self) -> &ComponentId {
         &self.id
     }
 
-    fn render(&mut self, area: Rect, buffer: &mut Buffer) -> Result<()> {
+    fn render_buffer(&mut self, area: Rect, buffer: &mut Buffer) -> Result<()> {
         if self.border {
             self.block().render(area, buffer);
         }
         let child_area = self.child_area(area);
-        self.child.render(child_area, buffer)?;
+        self.child.render_buffer(child_area, buffer)?;
         self.clear_dirty();
         Ok(())
     }
 
-    fn handle_key(&mut self, key: Key) -> Result<ElementOutcome<Self::Message>> {
-        self.child.handle_key(key)
+    fn handle_event(&mut self, event: &Key) -> Result<ElementOutcome<Self::Message>> {
+        self.child.handle_event(event)
     }
 
     fn dirty(&self) -> &DirtyState {
@@ -695,15 +642,15 @@ enum ChildElement<M> {
 impl<M> ChildElement<M> {
     fn render(&mut self, area: Rect, buffer: &mut Buffer) -> Result<()> {
         match self {
-            Self::Buffer(element) => element.render(area, buffer),
-            Self::Effect(element) => element.render(area, buffer),
+            Self::Buffer(element) => element.render_buffer(area, buffer),
+            Self::Effect(element) => element.render_buffer(area, buffer),
         }
     }
 
-    fn handle_key(&mut self, key: Key) -> Result<ElementOutcome<M>> {
+    fn handle_key(&mut self, event: &Key) -> Result<ElementOutcome<M>> {
         match self {
-            Self::Buffer(element) => element.handle_key(key),
-            Self::Effect(element) => element.handle_key(key),
+            Self::Buffer(element) => element.handle_event(event),
+            Self::Effect(element) => element.handle_event(event),
         }
     }
 
@@ -834,14 +781,15 @@ impl<M> Stack<M> {
     }
 }
 
-impl<M> Element for Stack<M> {
+impl<M> BufferComponent for Stack<M> {
+    type Event = Key;
     type Message = M;
 
     fn id(&self) -> &ComponentId {
         &self.id
     }
 
-    fn render(&mut self, area: Rect, buffer: &mut Buffer) -> Result<()> {
+    fn render_buffer(&mut self, area: Rect, buffer: &mut Buffer) -> Result<()> {
         let areas = self.layout_areas(area);
         for (child, child_area) in self.children.iter_mut().zip(areas) {
             child.element.render(child_area, buffer)?;
@@ -850,9 +798,9 @@ impl<M> Element for Stack<M> {
         Ok(())
     }
 
-    fn handle_key(&mut self, key: Key) -> Result<ElementOutcome<Self::Message>> {
+    fn handle_event(&mut self, event: &Key) -> Result<ElementOutcome<Self::Message>> {
         for child in self.children.iter_mut().rev() {
-            let outcome = child.element.handle_key(key)?;
+            let outcome = child.element.handle_key(event)?;
             if outcome.is_handled() {
                 return Ok(outcome);
             }
@@ -1026,16 +974,17 @@ impl<E: Element> ScrollY<E> {
     }
 }
 
-impl<E: Element> Element for ScrollY<E> {
+impl<E: Element> BufferComponent for ScrollY<E> {
+    type Event = Key;
     type Message = E::Message;
 
     fn id(&self) -> &ComponentId {
         self.child.id()
     }
 
-    fn render(&mut self, area: Rect, buffer: &mut Buffer) -> Result<()> {
+    fn render_buffer(&mut self, area: Rect, buffer: &mut Buffer) -> Result<()> {
         if self.offset == 0 {
-            self.child.render(area, buffer)?;
+            self.child.render_buffer(area, buffer)?;
             self.clear_dirty();
             return Ok(());
         }
@@ -1047,14 +996,14 @@ impl<E: Element> Element for ScrollY<E> {
             height: area.height.saturating_add(self.offset),
         };
         let mut virtual_buffer = Buffer::empty(virtual_area);
-        self.child.render(virtual_area, &mut virtual_buffer)?;
+        self.child.render_buffer(virtual_area, &mut virtual_buffer)?;
         blit_scrolled(&virtual_buffer, buffer, area, self.offset);
         self.clear_dirty();
         Ok(())
     }
 
-    fn handle_key(&mut self, key: Key) -> Result<ElementOutcome<Self::Message>> {
-        self.child.handle_key(key)
+    fn handle_event(&mut self, event: &Key) -> Result<ElementOutcome<Self::Message>> {
+        self.child.handle_event(event)
     }
 
     fn dirty(&self) -> &DirtyState {
@@ -1135,21 +1084,22 @@ impl<E: Element> Focusable<E> {
     }
 }
 
-impl<E: Element> Element for Focusable<E> {
+impl<E: Element> BufferComponent for Focusable<E> {
+    type Event = Key;
     type Message = E::Message;
 
     fn id(&self) -> &ComponentId {
         self.child.id()
     }
 
-    fn render(&mut self, area: Rect, buffer: &mut Buffer) -> Result<()> {
-        self.child.render(area, buffer)?;
+    fn render_buffer(&mut self, area: Rect, buffer: &mut Buffer) -> Result<()> {
+        self.child.render_buffer(area, buffer)?;
         self.clear_dirty();
         Ok(())
     }
 
-    fn handle_key(&mut self, key: Key) -> Result<ElementOutcome<Self::Message>> {
-        self.child.handle_key(key)
+    fn handle_event(&mut self, event: &Key) -> Result<ElementOutcome<Self::Message>> {
+        self.child.handle_event(event)
     }
 
     fn dirty(&self) -> &DirtyState {
@@ -1227,31 +1177,32 @@ where
     }
 }
 
-impl<E> Element for KeyMapped<E>
+impl<E> BufferComponent for KeyMapped<E>
 where
     E: Element,
     E::Message: Clone,
 {
+    type Event = Key;
     type Message = E::Message;
 
     fn id(&self) -> &ComponentId {
         self.child.id()
     }
 
-    fn render(&mut self, area: Rect, buffer: &mut Buffer) -> Result<()> {
-        self.child.render(area, buffer)?;
+    fn render_buffer(&mut self, area: Rect, buffer: &mut Buffer) -> Result<()> {
+        self.child.render_buffer(area, buffer)?;
         self.clear_dirty();
         Ok(())
     }
 
-    fn handle_key(&mut self, key: Key) -> Result<ElementOutcome<Self::Message>> {
-        let child = self.child.handle_key(key)?;
+    fn handle_event(&mut self, event: &Key) -> Result<ElementOutcome<Self::Message>> {
+        let child = self.child.handle_event(event)?;
         if child.is_handled() {
             return Ok(child);
         }
         Ok(self
             .keymap
-            .lookup(key)
+            .lookup(*event)
             .map(ComponentOutcome::Message)
             .unwrap_or(ComponentOutcome::Ignored))
     }
@@ -1329,21 +1280,22 @@ impl<E: Element> Padded<E> {
     }
 }
 
-impl<E: Element> Element for Padded<E> {
+impl<E: Element> BufferComponent for Padded<E> {
+    type Event = Key;
     type Message = E::Message;
 
     fn id(&self) -> &ComponentId {
         self.child.id()
     }
 
-    fn render(&mut self, area: Rect, buffer: &mut Buffer) -> Result<()> {
-        self.child.render(self.child_area(area), buffer)?;
+    fn render_buffer(&mut self, area: Rect, buffer: &mut Buffer) -> Result<()> {
+        self.child.render_buffer(self.child_area(area), buffer)?;
         self.clear_dirty();
         Ok(())
     }
 
-    fn handle_key(&mut self, key: Key) -> Result<ElementOutcome<Self::Message>> {
-        self.child.handle_key(key)
+    fn handle_event(&mut self, event: &Key) -> Result<ElementOutcome<Self::Message>> {
+        self.child.handle_event(event)
     }
 
     fn dirty(&self) -> &DirtyState {
@@ -1409,22 +1361,23 @@ impl<E: Element> Bordered<E> {
     }
 }
 
-impl<E: Element> Element for Bordered<E> {
+impl<E: Element> BufferComponent for Bordered<E> {
+    type Event = Key;
     type Message = E::Message;
 
     fn id(&self) -> &ComponentId {
         self.child.id()
     }
 
-    fn render(&mut self, area: Rect, buffer: &mut Buffer) -> Result<()> {
+    fn render_buffer(&mut self, area: Rect, buffer: &mut Buffer) -> Result<()> {
         self.border.block().render(area, buffer);
-        self.child.render(self.child_area(area), buffer)?;
+        self.child.render_buffer(self.child_area(area), buffer)?;
         self.clear_dirty();
         Ok(())
     }
 
-    fn handle_key(&mut self, key: Key) -> Result<ElementOutcome<Self::Message>> {
-        self.child.handle_key(key)
+    fn handle_event(&mut self, event: &Key) -> Result<ElementOutcome<Self::Message>> {
+        self.child.handle_event(event)
     }
 
     fn dirty(&self) -> &DirtyState {
@@ -1936,7 +1889,7 @@ where
             || !self.child.dirty().is_clean();
         if needs_render {
             let mut child_buffer = Buffer::empty(child_area);
-            self.child.render(child_area, &mut child_buffer)?;
+            self.child.render_buffer(child_area, &mut child_buffer)?;
             self.child.clear_dirty();
             self.child_cache = Some(child_buffer);
             self.child_cache_area = Some(child_area);
@@ -1951,24 +1904,25 @@ where
     }
 }
 
-impl<E> Element for Window<E>
+impl<E> BufferComponent for Window<E>
 where
     E: Element,
     E::Message: Clone,
 {
+    type Event = Key;
     type Message = E::Message;
 
     fn id(&self) -> &ComponentId {
         &self.id
     }
 
-    fn render(&mut self, area: Rect, buffer: &mut Buffer) -> Result<()> {
+    fn render_buffer(&mut self, area: Rect, buffer: &mut Buffer) -> Result<()> {
         self.record_resize(area);
         self.chrome.render(area, buffer);
         let child_area = self.child_area(area);
         match self.repaint_policy {
             WindowRepaintPolicy::Whole => {
-                self.child.render(child_area, buffer)?;
+                self.child.render_buffer(child_area, buffer)?;
                 self.child.clear_dirty();
                 self.stats.whole_repaints += 1;
                 self.stats.last_repaint_area = Some(area);
@@ -1982,21 +1936,21 @@ where
         Ok(())
     }
 
-    fn handle_key(&mut self, key: Key) -> Result<ElementOutcome<Self::Message>> {
+    fn handle_event(&mut self, event: &Key) -> Result<ElementOutcome<Self::Message>> {
         if !(self.active || self.focused) {
             return Ok(ComponentOutcome::Ignored);
         }
         // Focus controls child-first routing; active alone enables the
         // window-local keymap without handing input to the child.
         if self.focused {
-            let child = self.child.handle_key(key)?;
+            let child = self.child.handle_event(event)?;
             if child.is_handled() {
                 return Ok(child);
             }
         }
         Ok(self
             .keymap
-            .lookup(key)
+            .lookup(*event)
             .map(ComponentOutcome::Message)
             .unwrap_or(ComponentOutcome::Ignored))
     }
@@ -2285,14 +2239,15 @@ impl ImageViewportElement {
     }
 }
 
-impl Element for ImageViewportElement {
+impl BufferComponent for ImageViewportElement {
+    type Event = Key;
     type Message = ();
 
     fn id(&self) -> &ComponentId {
         &self.id
     }
 
-    fn render(&mut self, _area: Rect, _buffer: &mut Buffer) -> Result<()> {
+    fn render_buffer(&mut self, _area: Rect, _buffer: &mut Buffer) -> Result<()> {
         Ok(())
     }
 
@@ -2403,23 +2358,24 @@ where
     }
 }
 
-impl<E> Element for Modal<E>
+impl<E> BufferComponent for Modal<E>
 where
     E: Element,
     E::Message: Clone,
 {
+    type Event = Key;
     type Message = E::Message;
 
     fn id(&self) -> &ComponentId {
         self.window.id()
     }
 
-    fn render(&mut self, area: Rect, buffer: &mut Buffer) -> Result<()> {
-        self.window.render(area, buffer)
+    fn render_buffer(&mut self, area: Rect, buffer: &mut Buffer) -> Result<()> {
+        self.window.render_buffer(area, buffer)
     }
 
-    fn handle_key(&mut self, key: Key) -> Result<ElementOutcome<Self::Message>> {
-        self.window.handle_key(key)
+    fn handle_event(&mut self, event: &Key) -> Result<ElementOutcome<Self::Message>> {
+        self.window.handle_event(event)
     }
 
     fn dirty(&self) -> &DirtyState {
@@ -2595,14 +2551,15 @@ impl<M> Overlay<M> {
     }
 }
 
-impl<M> Element for Overlay<M> {
+impl<M> BufferComponent for Overlay<M> {
+    type Event = Key;
     type Message = M;
 
     fn id(&self) -> &ComponentId {
         &self.id
     }
 
-    fn render(&mut self, area: Rect, buffer: &mut Buffer) -> Result<()> {
+    fn render_buffer(&mut self, area: Rect, buffer: &mut Buffer) -> Result<()> {
         for layer in &mut self.layers {
             layer.element.render(layer.area.unwrap_or(area), buffer)?;
         }
@@ -2610,12 +2567,12 @@ impl<M> Element for Overlay<M> {
         Ok(())
     }
 
-    fn handle_key(&mut self, key: Key) -> Result<ElementOutcome<Self::Message>> {
+    fn handle_event(&mut self, event: &Key) -> Result<ElementOutcome<Self::Message>> {
         if let Some(layer) = self.layers.iter_mut().rev().find(|layer| layer.modal) {
-            return layer.element.handle_key(key);
+            return layer.element.handle_key(event);
         }
         for layer in self.layers.iter_mut().rev() {
-            let outcome = layer.element.handle_key(key)?;
+            let outcome = layer.element.handle_key(event)?;
             if outcome.is_handled() {
                 return Ok(outcome);
             }
@@ -2707,14 +2664,15 @@ mod tests {
         }
     }
 
-    impl Element for ProbeElement {
+    impl BufferComponent for ProbeElement {
+        type Event = Key;
         type Message = TestCommand;
 
         fn id(&self) -> &ComponentId {
             &self.id
         }
 
-        fn render(&mut self, area: Rect, buffer: &mut Buffer) -> Result<()> {
+        fn render_buffer(&mut self, area: Rect, buffer: &mut Buffer) -> Result<()> {
             buffer.set_stringn(
                 area.x,
                 area.y,
@@ -2726,10 +2684,10 @@ mod tests {
             Ok(())
         }
 
-        fn handle_key(&mut self, key: Key) -> Result<ElementOutcome<Self::Message>> {
+        fn handle_event(&mut self, event: &Key) -> Result<ElementOutcome<Self::Message>> {
             Ok(self
                 .keymap
-                .lookup(key)
+                .lookup(*event)
                 .map(ComponentOutcome::Message)
                 .unwrap_or(ComponentOutcome::Ignored))
         }
@@ -2776,14 +2734,15 @@ mod tests {
         }
     }
 
-    impl Element for AreaProbeElement {
+    impl BufferComponent for AreaProbeElement {
+        type Event = Key;
         type Message = TestCommand;
 
         fn id(&self) -> &ComponentId {
             &self.id
         }
 
-        fn render(&mut self, area: Rect, buffer: &mut Buffer) -> Result<()> {
+        fn render_buffer(&mut self, area: Rect, buffer: &mut Buffer) -> Result<()> {
             self.areas.borrow_mut().push(area);
             if area.width > 0 && area.height > 0 {
                 buffer.set_stringn(
@@ -2798,10 +2757,10 @@ mod tests {
             Ok(())
         }
 
-        fn handle_key(&mut self, key: Key) -> Result<ElementOutcome<Self::Message>> {
+        fn handle_event(&mut self, event: &Key) -> Result<ElementOutcome<Self::Message>> {
             Ok(self
                 .keymap
-                .lookup(key)
+                .lookup(*event)
                 .map(ComponentOutcome::Message)
                 .unwrap_or(ComponentOutcome::Ignored))
         }
@@ -2852,14 +2811,15 @@ mod tests {
         }
     }
 
-    impl Element for EffectProbeElement {
+    impl BufferComponent for EffectProbeElement {
+        type Event = Key;
         type Message = TestCommand;
 
         fn id(&self) -> &ComponentId {
             &self.id
         }
 
-        fn render(&mut self, _area: Rect, _buffer: &mut Buffer) -> Result<()> {
+        fn render_buffer(&mut self, _area: Rect, _buffer: &mut Buffer) -> Result<()> {
             self.clear_dirty();
             Ok(())
         }
@@ -2929,14 +2889,15 @@ mod tests {
         }
     }
 
-    impl Element for ToggleEffectProbeElement {
+    impl BufferComponent for ToggleEffectProbeElement {
+        type Event = Key;
         type Message = TestCommand;
 
         fn id(&self) -> &ComponentId {
             &self.id
         }
 
-        fn render(&mut self, _area: Rect, _buffer: &mut Buffer) -> Result<()> {
+        fn render_buffer(&mut self, _area: Rect, _buffer: &mut Buffer) -> Result<()> {
             self.clear_dirty();
             Ok(())
         }
@@ -2995,7 +2956,7 @@ mod tests {
         let area = Rect::new(0, 0, 4, 1);
         let mut buffer = Buffer::empty(area);
 
-        text.render(area, &mut buffer)?;
+        text.render_buffer(area, &mut buffer)?;
 
         assert!(format!("{buffer:?}").contains("a..."));
         assert!(text.dirty().is_clean());
@@ -3092,7 +3053,7 @@ mod tests {
         let area = Rect::new(0, 0, 8, 2);
         let mut buffer = Buffer::empty(area);
 
-        element.render(area, &mut buffer)?;
+        element.render_buffer(area, &mut buffer)?;
 
         let rendered = format!("{buffer:?}");
         assert!(rendered.contains("two"));
@@ -3109,7 +3070,7 @@ mod tests {
             .scroll_y();
 
         assert_eq!(
-            element.handle_key(Key::Char('x'))?,
+            element.handle_event(&Key::Char('x'))?,
             ComponentOutcome::Message(TestCommand::Child)
         );
         Ok(())
@@ -3139,7 +3100,7 @@ mod tests {
         assert_eq!(node.id.as_str(), "field");
         assert!(!node.focusable());
         assert_eq!(
-            element.handle_key(Key::Char('x'))?,
+            element.handle_event(&Key::Char('x'))?,
             ComponentOutcome::Message(TestCommand::Child)
         );
         Ok(())
@@ -3168,15 +3129,15 @@ mod tests {
             .with_keymap(local);
 
         assert_eq!(
-            element.handle_key(Key::Char('x'))?,
+            element.handle_event(&Key::Char('x'))?,
             ComponentOutcome::Message(TestCommand::Child)
         );
         assert_eq!(
-            element.handle_key(Key::Char('y'))?,
+            element.handle_event(&Key::Char('y'))?,
             ComponentOutcome::Message(TestCommand::Window)
         );
         assert_eq!(
-            element.handle_key(Key::Char('z'))?,
+            element.handle_event(&Key::Char('z'))?,
             ComponentOutcome::Ignored
         );
         Ok(())
@@ -3191,7 +3152,7 @@ mod tests {
 
         assert_eq!(element.child_area(area), Rect::new(2, 1, 6, 3));
         element.mark_dirty(DirtyReason::Resize);
-        element.render(area, &mut buffer)?;
+        element.render_buffer(area, &mut buffer)?;
 
         assert_eq!(areas.borrow().as_slice(), &[Rect::new(2, 1, 6, 3)]);
         assert_eq!(dirty_events.borrow().as_slice(), &[DirtyReason::Resize]);
@@ -3207,7 +3168,7 @@ mod tests {
         let mut buffer = Buffer::empty(area);
 
         assert_eq!(element.child_area(area), Rect::new(1, 1, 10, 1));
-        element.render(area, &mut buffer)?;
+        element.render_buffer(area, &mut buffer)?;
 
         let rendered = format!("{buffer:?}");
         assert!(rendered.contains("Title"));
@@ -3222,7 +3183,7 @@ mod tests {
         let area = Rect::new(0, 0, 10, 5);
         let mut buffer = Buffer::empty(area);
 
-        element.render(area, &mut buffer)?;
+        element.render_buffer(area, &mut buffer)?;
 
         assert_eq!(areas.borrow().as_slice(), &[Rect::new(2, 2, 6, 1)]);
         Ok(())
@@ -3235,7 +3196,7 @@ mod tests {
         let area = Rect::new(0, 0, 0, 0);
         let mut buffer = Buffer::empty(area);
 
-        element.render(area, &mut buffer)?;
+        element.render_buffer(area, &mut buffer)?;
 
         assert_eq!(areas.borrow().as_slice(), &[Rect::new(0, 0, 0, 0)]);
         Ok(())
@@ -3441,9 +3402,9 @@ mod tests {
         });
         let mut buffer = Buffer::empty(second);
 
-        window.render(first, &mut buffer)?;
-        window.render(first, &mut buffer)?;
-        window.render(second, &mut buffer)?;
+        window.render_buffer(first, &mut buffer)?;
+        window.render_buffer(first, &mut buffer)?;
+        window.render_buffer(second, &mut buffer)?;
 
         assert_eq!(
             *events.borrow(),
@@ -3468,25 +3429,25 @@ mod tests {
             Window::new("window", child).with_keymap(command_map('x', TestCommand::Window));
 
         assert_eq!(
-            window.handle_key(Key::Char('x'))?,
+            window.handle_event(&Key::Char('x'))?,
             ComponentOutcome::Ignored
         );
 
         window.activate();
         assert_eq!(
-            window.handle_key(Key::Char('x'))?,
+            window.handle_event(&Key::Char('x'))?,
             ComponentOutcome::Message(TestCommand::Child)
         );
 
         window.blur();
         assert_eq!(
-            window.handle_key(Key::Char('x'))?,
+            window.handle_event(&Key::Char('x'))?,
             ComponentOutcome::Message(TestCommand::Window)
         );
 
         window.deactivate();
         assert_eq!(
-            window.handle_key(Key::Char('x'))?,
+            window.handle_event(&Key::Char('x'))?,
             ComponentOutcome::Ignored
         );
         Ok(())
@@ -3583,8 +3544,8 @@ mod tests {
         let mut first = Buffer::empty(area);
         let mut second = Buffer::empty(area);
 
-        window.render(area, &mut first)?;
-        window.render(area, &mut second)?;
+        window.render_buffer(area, &mut first)?;
+        window.render_buffer(area, &mut second)?;
 
         assert_eq!(window.stats().child_cache_misses, 1);
         assert_eq!(window.stats().child_cache_hits, 1);
@@ -3689,7 +3650,7 @@ mod tests {
         let mut modal = Modal::new("modal", child);
 
         assert_eq!(
-            modal.handle_key(Key::Char('m'))?,
+            modal.handle_event(&Key::Char('m'))?,
             ComponentOutcome::Message(TestCommand::Modal)
         );
         Ok(())
@@ -3703,7 +3664,7 @@ mod tests {
         let area = Rect::new(0, 0, 4, 1);
         let mut buffer = Buffer::empty(area);
 
-        overlay.render(area, &mut buffer)?;
+        overlay.render_buffer(area, &mut buffer)?;
 
         assert!(format!("{buffer:?}").contains("top!"));
         Ok(())
@@ -3722,7 +3683,7 @@ mod tests {
             );
 
         assert_eq!(
-            overlay.handle_key(Key::Char('x'))?,
+            overlay.handle_event(&Key::Char('x'))?,
             ComponentOutcome::Message(TestCommand::Top)
         );
         Ok(())
@@ -3741,11 +3702,11 @@ mod tests {
             );
 
         assert_eq!(
-            overlay.handle_key(Key::Char('x'))?,
+            overlay.handle_event(&Key::Char('x'))?,
             ComponentOutcome::Ignored
         );
         assert_eq!(
-            overlay.handle_key(Key::Char('m'))?,
+            overlay.handle_event(&Key::Char('m'))?,
             ComponentOutcome::Message(TestCommand::Modal)
         );
         Ok(())
@@ -3757,7 +3718,7 @@ mod tests {
         map.bind(KeyTrigger::Special(SpecialKey::Enter), ());
         let mut element = Text::new("ok").with_keymap(map);
 
-        assert!(element.handle_key(Key::Enter)?.is_handled());
+        assert!(element.handle_event(&Key::Enter)?.is_handled());
         Ok(())
     }
 }

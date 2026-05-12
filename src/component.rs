@@ -188,8 +188,10 @@ pub trait BufferComponent {
 
     fn handle_event(
         &mut self,
-        event: &Self::Event,
-    ) -> anyhow::Result<ComponentOutcome<Self::Message>>;
+        _event: &Self::Event,
+    ) -> anyhow::Result<ComponentOutcome<Self::Message>> {
+        Ok(ComponentOutcome::Ignored)
+    }
 
     fn dirty(&self) -> &DirtyState;
 
