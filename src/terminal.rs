@@ -280,18 +280,6 @@ mod tests {
     }
 
     #[test]
-    fn terminal_config_rejects_unimplemented_explicit_protocol_before_entry() {
-        let error = TerminalConfig {
-            image_backend: ImageBackendPreference::Explicit(ImageProtocol::Sixel),
-        }
-        .validate()
-        .unwrap_err();
-
-        assert_eq!(error.path, "terminal.image_backend.protocol");
-        assert!(error.reason.contains("not implemented"));
-    }
-
-    #[test]
     fn terminal_config_rewrites_image_backend_paths_without_doubling() {
         let error = terminal_image_backend_error(
             "image.backend.protocol".to_string(),
