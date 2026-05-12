@@ -20,7 +20,7 @@ use crate::component::{
 };
 use crate::focus::{FocusId, FocusNode, FocusScopeKind};
 use crate::image::{ImageSurface, ImageSurfaceRegistry, PlaceOptions};
-use crate::input::Key;
+use crate::input::KeyEvent;
 use crate::keymap::KeyMap;
 use crate::layout::{CanvasMetrics, CellOffset, CellPixel, CellSize};
 use crate::widgets::image_viewport::ImageViewportWidget;
@@ -31,14 +31,14 @@ pub type ElementOutcome<Message> = ComponentOutcome<Message>;
 /// Buffer-rendered UI object: a [`BufferComponent`] whose event type is keyboard input.
 ///
 /// `Element` is a marker subtrait. Every implementation is written as
-/// `impl BufferComponent for Foo` (with `type Event = Key;`), and the blanket
+/// `impl BufferComponent for Foo` (with `type Event = KeyEvent;`), and the blanket
 /// impl below makes any such type automatically `Element`. The `Element` name
 /// remains useful in `dyn Element<Message = M>` and `impl Element<Message = M>`
 /// positions to express "buffer-rendered keyboard-driven UI object" without
-/// repeating the `BufferComponent<Event = Key>` bound at every call site.
-pub trait Element: BufferComponent<Event = Key> {}
+/// repeating the `BufferComponent<Event = KeyEvent>` bound at every call site.
+pub trait Element: BufferComponent<Event = KeyEvent> {}
 
-impl<T> Element for T where T: BufferComponent<Event = Key> {}
+impl<T> Element for T where T: BufferComponent<Event = KeyEvent> {}
 
 /// Element with inspectable child membership.
 pub trait ContainerElement: Element {
@@ -365,7 +365,7 @@ impl Text {
 }
 
 impl BufferComponent for Text {
-    type Event = Key;
+    type Event = KeyEvent;
     type Message = ();
 
     fn id(&self) -> &ComponentId {
@@ -552,7 +552,7 @@ impl<E: Element> Panel<E> {
 }
 
 impl<E: Element> BufferComponent for Panel<E> {
-    type Event = Key;
+    type Event = KeyEvent;
     type Message = E::Message;
 
     fn id(&self) -> &ComponentId {
@@ -569,7 +569,7 @@ impl<E: Element> BufferComponent for Panel<E> {
         Ok(())
     }
 
-    fn handle_event(&mut self, event: &Key) -> Result<ElementOutcome<Self::Message>> {
+    fn handle_event(&mut self, event: &KeyEvent) -> Result<ElementOutcome<Self::Message>> {
         self.child.handle_event(event)
     }
 
@@ -649,7 +649,7 @@ impl<M> ChildElement<M> {
         }
     }
 
-    fn handle_key(&mut self, event: &Key) -> Result<ElementOutcome<M>> {
+    fn handle_key(&mut self, event: &KeyEvent) -> Result<ElementOutcome<M>> {
         match self {
             Self::Buffer(element) => element.handle_event(event),
             Self::Effect(element) => element.handle_event(event),
@@ -784,7 +784,7 @@ impl<M> Stack<M> {
 }
 
 impl<M> BufferComponent for Stack<M> {
-    type Event = Key;
+    type Event = KeyEvent;
     type Message = M;
 
     fn id(&self) -> &ComponentId {
@@ -800,7 +800,7 @@ impl<M> BufferComponent for Stack<M> {
         Ok(())
     }
 
-    fn handle_event(&mut self, event: &Key) -> Result<ElementOutcome<Self::Message>> {
+    fn handle_event(&mut self, event: &KeyEvent) -> Result<ElementOutcome<Self::Message>> {
         for child in self.children.iter_mut().rev() {
             let outcome = child.element.handle_key(event)?;
             if outcome.is_handled() {
@@ -977,7 +977,7 @@ impl<E: Element> ScrollY<E> {
 }
 
 impl<E: Element> BufferComponent for ScrollY<E> {
-    type Event = Key;
+    type Event = KeyEvent;
     type Message = E::Message;
 
     fn id(&self) -> &ComponentId {
@@ -1005,7 +1005,7 @@ impl<E: Element> BufferComponent for ScrollY<E> {
         Ok(())
     }
 
-    fn handle_event(&mut self, event: &Key) -> Result<ElementOutcome<Self::Message>> {
+    fn handle_event(&mut self, event: &KeyEvent) -> Result<ElementOutcome<Self::Message>> {
         self.child.handle_event(event)
     }
 
@@ -1088,7 +1088,7 @@ impl<E: Element> Focusable<E> {
 }
 
 impl<E: Element> BufferComponent for Focusable<E> {
-    type Event = Key;
+    type Event = KeyEvent;
     type Message = E::Message;
 
     fn id(&self) -> &ComponentId {
@@ -1101,7 +1101,7 @@ impl<E: Element> BufferComponent for Focusable<E> {
         Ok(())
     }
 
-    fn handle_event(&mut self, event: &Key) -> Result<ElementOutcome<Self::Message>> {
+    fn handle_event(&mut self, event: &KeyEvent) -> Result<ElementOutcome<Self::Message>> {
         self.child.handle_event(event)
     }
 
@@ -1185,7 +1185,7 @@ where
     E: Element,
     E::Message: Clone,
 {
-    type Event = Key;
+    type Event = KeyEvent;
     type Message = E::Message;
 
     fn id(&self) -> &ComponentId {
@@ -1198,7 +1198,7 @@ where
         Ok(())
     }
 
-    fn handle_event(&mut self, event: &Key) -> Result<ElementOutcome<Self::Message>> {
+    fn handle_event(&mut self, event: &KeyEvent) -> Result<ElementOutcome<Self::Message>> {
         let child = self.child.handle_event(event)?;
         if child.is_handled() {
             return Ok(child);
@@ -1284,7 +1284,7 @@ impl<E: Element> Padded<E> {
 }
 
 impl<E: Element> BufferComponent for Padded<E> {
-    type Event = Key;
+    type Event = KeyEvent;
     type Message = E::Message;
 
     fn id(&self) -> &ComponentId {
@@ -1297,7 +1297,7 @@ impl<E: Element> BufferComponent for Padded<E> {
         Ok(())
     }
 
-    fn handle_event(&mut self, event: &Key) -> Result<ElementOutcome<Self::Message>> {
+    fn handle_event(&mut self, event: &KeyEvent) -> Result<ElementOutcome<Self::Message>> {
         self.child.handle_event(event)
     }
 
@@ -1365,7 +1365,7 @@ impl<E: Element> Bordered<E> {
 }
 
 impl<E: Element> BufferComponent for Bordered<E> {
-    type Event = Key;
+    type Event = KeyEvent;
     type Message = E::Message;
 
     fn id(&self) -> &ComponentId {
@@ -1379,7 +1379,7 @@ impl<E: Element> BufferComponent for Bordered<E> {
         Ok(())
     }
 
-    fn handle_event(&mut self, event: &Key) -> Result<ElementOutcome<Self::Message>> {
+    fn handle_event(&mut self, event: &KeyEvent) -> Result<ElementOutcome<Self::Message>> {
         self.child.handle_event(event)
     }
 
@@ -1912,7 +1912,7 @@ where
     E: Element,
     E::Message: Clone,
 {
-    type Event = Key;
+    type Event = KeyEvent;
     type Message = E::Message;
 
     fn id(&self) -> &ComponentId {
@@ -1939,7 +1939,7 @@ where
         Ok(())
     }
 
-    fn handle_event(&mut self, event: &Key) -> Result<ElementOutcome<Self::Message>> {
+    fn handle_event(&mut self, event: &KeyEvent) -> Result<ElementOutcome<Self::Message>> {
         if !(self.active || self.focused) {
             return Ok(ComponentOutcome::Ignored);
         }
@@ -2146,7 +2146,7 @@ impl<C: Clone> KeyScopeResolver<C> {
         self
     }
 
-    pub fn resolve(&self, key: Key) -> Option<KeyResolution<C>> {
+    pub fn resolve(&self, key: KeyEvent) -> Option<KeyResolution<C>> {
         self.resolve_role(key, KeyScopeRole::ModalWindow, |scope| scope.active)
             .or_else(|| {
                 self.resolve_role(key, KeyScopeRole::FocusedChild, |scope| {
@@ -2165,7 +2165,7 @@ impl<C: Clone> KeyScopeResolver<C> {
 
     fn resolve_role(
         &self,
-        key: Key,
+        key: KeyEvent,
         role: KeyScopeRole,
         eligible: impl Fn(&KeyScope<C>) -> bool,
     ) -> Option<KeyResolution<C>> {
@@ -2243,7 +2243,7 @@ impl ImageViewportElement {
 }
 
 impl BufferComponent for ImageViewportElement {
-    type Event = Key;
+    type Event = KeyEvent;
     type Message = ();
 
     fn id(&self) -> &ComponentId {
@@ -2366,7 +2366,7 @@ where
     E: Element,
     E::Message: Clone,
 {
-    type Event = Key;
+    type Event = KeyEvent;
     type Message = E::Message;
 
     fn id(&self) -> &ComponentId {
@@ -2377,7 +2377,7 @@ where
         self.window.render_buffer(area, buffer)
     }
 
-    fn handle_event(&mut self, event: &Key) -> Result<ElementOutcome<Self::Message>> {
+    fn handle_event(&mut self, event: &KeyEvent) -> Result<ElementOutcome<Self::Message>> {
         self.window.handle_event(event)
     }
 
@@ -2555,7 +2555,7 @@ impl<M> Overlay<M> {
 }
 
 impl<M> BufferComponent for Overlay<M> {
-    type Event = Key;
+    type Event = KeyEvent;
     type Message = M;
 
     fn id(&self) -> &ComponentId {
@@ -2570,7 +2570,7 @@ impl<M> BufferComponent for Overlay<M> {
         Ok(())
     }
 
-    fn handle_event(&mut self, event: &Key) -> Result<ElementOutcome<Self::Message>> {
+    fn handle_event(&mut self, event: &KeyEvent) -> Result<ElementOutcome<Self::Message>> {
         if let Some(layer) = self.layers.iter_mut().rev().find(|layer| layer.modal) {
             return layer.element.handle_key(event);
         }
@@ -2668,7 +2668,7 @@ mod tests {
     }
 
     impl BufferComponent for ProbeElement {
-        type Event = Key;
+        type Event = KeyEvent;
         type Message = TestCommand;
 
         fn id(&self) -> &ComponentId {
@@ -2687,7 +2687,7 @@ mod tests {
             Ok(())
         }
 
-        fn handle_event(&mut self, event: &Key) -> Result<ElementOutcome<Self::Message>> {
+        fn handle_event(&mut self, event: &KeyEvent) -> Result<ElementOutcome<Self::Message>> {
             Ok(self
                 .keymap
                 .lookup(*event)
@@ -2738,7 +2738,7 @@ mod tests {
     }
 
     impl BufferComponent for AreaProbeElement {
-        type Event = Key;
+        type Event = KeyEvent;
         type Message = TestCommand;
 
         fn id(&self) -> &ComponentId {
@@ -2760,7 +2760,7 @@ mod tests {
             Ok(())
         }
 
-        fn handle_event(&mut self, event: &Key) -> Result<ElementOutcome<Self::Message>> {
+        fn handle_event(&mut self, event: &KeyEvent) -> Result<ElementOutcome<Self::Message>> {
             Ok(self
                 .keymap
                 .lookup(*event)
@@ -2815,7 +2815,7 @@ mod tests {
     }
 
     impl BufferComponent for EffectProbeElement {
-        type Event = Key;
+        type Event = KeyEvent;
         type Message = TestCommand;
 
         fn id(&self) -> &ComponentId {
@@ -2893,7 +2893,7 @@ mod tests {
     }
 
     impl BufferComponent for ToggleEffectProbeElement {
-        type Event = Key;
+        type Event = KeyEvent;
         type Message = TestCommand;
 
         fn id(&self) -> &ComponentId {
@@ -3073,7 +3073,7 @@ mod tests {
             .scroll_y();
 
         assert_eq!(
-            element.handle_event(&Key::Char('x'))?,
+            element.handle_event(&KeyEvent::Char('x'))?,
             ComponentOutcome::Message(TestCommand::Child)
         );
         Ok(())
@@ -3103,7 +3103,7 @@ mod tests {
         assert_eq!(node.id.as_str(), "field");
         assert!(!node.focusable());
         assert_eq!(
-            element.handle_event(&Key::Char('x'))?,
+            element.handle_event(&KeyEvent::Char('x'))?,
             ComponentOutcome::Message(TestCommand::Child)
         );
         Ok(())
@@ -3132,15 +3132,15 @@ mod tests {
             .with_keymap(local);
 
         assert_eq!(
-            element.handle_event(&Key::Char('x'))?,
+            element.handle_event(&KeyEvent::Char('x'))?,
             ComponentOutcome::Message(TestCommand::Child)
         );
         assert_eq!(
-            element.handle_event(&Key::Char('y'))?,
+            element.handle_event(&KeyEvent::Char('y'))?,
             ComponentOutcome::Message(TestCommand::Window)
         );
         assert_eq!(
-            element.handle_event(&Key::Char('z'))?,
+            element.handle_event(&KeyEvent::Char('z'))?,
             ComponentOutcome::Ignored
         );
         Ok(())
@@ -3432,25 +3432,25 @@ mod tests {
             Window::new("window", child).with_keymap(command_map('x', TestCommand::Window));
 
         assert_eq!(
-            window.handle_event(&Key::Char('x'))?,
+            window.handle_event(&KeyEvent::Char('x'))?,
             ComponentOutcome::Ignored
         );
 
         window.activate();
         assert_eq!(
-            window.handle_event(&Key::Char('x'))?,
+            window.handle_event(&KeyEvent::Char('x'))?,
             ComponentOutcome::Message(TestCommand::Child)
         );
 
         window.blur();
         assert_eq!(
-            window.handle_event(&Key::Char('x'))?,
+            window.handle_event(&KeyEvent::Char('x'))?,
             ComponentOutcome::Message(TestCommand::Window)
         );
 
         window.deactivate();
         assert_eq!(
-            window.handle_event(&Key::Char('x'))?,
+            window.handle_event(&KeyEvent::Char('x'))?,
             ComponentOutcome::Ignored
         );
         Ok(())
@@ -3587,7 +3587,7 @@ mod tests {
             );
 
         assert_eq!(
-            resolver.resolve(Key::Char('x')).unwrap().command,
+            resolver.resolve(KeyEvent::Char('x')).unwrap().command,
             Cmd::Modal
         );
     }
@@ -3653,7 +3653,7 @@ mod tests {
         let mut modal = Modal::new("modal", child);
 
         assert_eq!(
-            modal.handle_event(&Key::Char('m'))?,
+            modal.handle_event(&KeyEvent::Char('m'))?,
             ComponentOutcome::Message(TestCommand::Modal)
         );
         Ok(())
@@ -3686,7 +3686,7 @@ mod tests {
             );
 
         assert_eq!(
-            overlay.handle_event(&Key::Char('x'))?,
+            overlay.handle_event(&KeyEvent::Char('x'))?,
             ComponentOutcome::Message(TestCommand::Top)
         );
         Ok(())
@@ -3705,11 +3705,11 @@ mod tests {
             );
 
         assert_eq!(
-            overlay.handle_event(&Key::Char('x'))?,
+            overlay.handle_event(&KeyEvent::Char('x'))?,
             ComponentOutcome::Ignored
         );
         assert_eq!(
-            overlay.handle_event(&Key::Char('m'))?,
+            overlay.handle_event(&KeyEvent::Char('m'))?,
             ComponentOutcome::Message(TestCommand::Modal)
         );
         Ok(())
@@ -3721,7 +3721,7 @@ mod tests {
         map.bind(KeyTrigger::Special(SpecialKey::Enter), ());
         let mut element = Text::new("ok").with_keymap(map);
 
-        assert!(element.handle_event(&Key::Enter)?.is_handled());
+        assert!(element.handle_event(&KeyEvent::Enter)?.is_handled());
         Ok(())
     }
 }
