@@ -9,7 +9,7 @@
 //! trigger-to-command lookup mechanics only; default bindings and command
 //! semantics stay in applications.
 
-use crate::input::Key;
+use crate::input::KeyEvent;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum KeyTrigger {
@@ -61,7 +61,7 @@ impl<C: Clone> KeyMap<C> {
         self
     }
 
-    pub fn lookup(&self, key: Key) -> Option<C> {
+    pub fn lookup(&self, key: KeyEvent) -> Option<C> {
         self.bindings
             .iter()
             .rev()
@@ -79,28 +79,28 @@ impl<C: Clone> KeyMap<C> {
 }
 
 impl KeyTrigger {
-    pub fn matches(self, key: Key) -> bool {
+    pub fn matches(self, key: KeyEvent) -> bool {
         match (self, key) {
-            (Self::Char(want), Key::Char(got)) => want == got,
-            (Self::CharCaseInsensitive(want), Key::Char(got)) => want.eq_ignore_ascii_case(&got),
-            (Self::Special(want), key) => SpecialKey::from_key(key) == Some(want),
+            (Self::Char(want), KeyEvent::Char(got)) => want == got,
+            (Self::CharCaseInsensitive(want), KeyEvent::Char(got)) => want.eq_ignore_ascii_case(&got),
+            (Self::Special(want), key) => SpecialKey::from_key_event(key) == Some(want),
             _ => false,
         }
     }
 }
 
 impl SpecialKey {
-    fn from_key(key: Key) -> Option<Self> {
+    pub fn from_key_event(key: KeyEvent) -> Option<Self> {
         Some(match key {
-            Key::Up => Self::Up,
-            Key::Down => Self::Down,
-            Key::Left => Self::Left,
-            Key::Right => Self::Right,
-            Key::Back => Self::Back,
-            Key::Enter => Self::Enter,
-            Key::Tab => Self::Tab,
-            Key::Esc => Self::Esc,
-            Key::CtrlC => Self::CtrlC,
+            KeyEvent::Up => Self::Up,
+            KeyEvent::Down => Self::Down,
+            KeyEvent::Left => Self::Left,
+            KeyEvent::Right => Self::Right,
+            KeyEvent::Back => Self::Back,
+            KeyEvent::Enter => Self::Enter,
+            KeyEvent::Tab => Self::Tab,
+            KeyEvent::Esc => Self::Esc,
+            KeyEvent::CtrlC => Self::CtrlC,
             _ => return None,
         })
     }
@@ -128,26 +128,26 @@ mod tests {
     #[test]
     fn case_insensitive_matches_both_cases() {
         let m = map();
-        assert_eq!(m.lookup(Key::Char('q')), Some(Cmd::Quit));
-        assert_eq!(m.lookup(Key::Char('Q')), Some(Cmd::Quit));
+        assert_eq!(m.lookup(KeyEvent::Char('q')), Some(Cmd::Quit));
+        assert_eq!(m.lookup(KeyEvent::Char('Q')), Some(Cmd::Quit));
     }
 
     #[test]
     fn special_keys_match_exactly() {
         let m = map();
-        assert_eq!(m.lookup(Key::Up), Some(Cmd::Up));
-        assert_eq!(m.lookup(Key::Enter), Some(Cmd::Confirm));
+        assert_eq!(m.lookup(KeyEvent::Up), Some(Cmd::Up));
+        assert_eq!(m.lookup(KeyEvent::Enter), Some(Cmd::Confirm));
     }
 
     #[test]
     fn last_binding_wins() {
         let mut m = map();
         m.bind(KeyTrigger::Char('q'), Cmd::Confirm);
-        assert_eq!(m.lookup(Key::Char('q')), Some(Cmd::Confirm));
+        assert_eq!(m.lookup(KeyEvent::Char('q')), Some(Cmd::Confirm));
     }
 
     #[test]
     fn unmatched_key_returns_none() {
-        assert!(map().lookup(Key::Char('z')).is_none());
+        assert!(map().lookup(KeyEvent::Char('z')).is_none());
     }
 }
