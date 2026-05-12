@@ -15,7 +15,9 @@ use ratatui::style::Style;
 use ratatui::widgets::{Block, Borders, Widget};
 use serde::{Deserialize, Serialize};
 
-use crate::component::{BufferComponent, ComponentChildren, ComponentId, ComponentOutcome, DirtyReason, DirtyState};
+use crate::component::{
+    BufferComponent, ComponentChildren, ComponentId, ComponentOutcome, DirtyReason, DirtyState,
+};
 use crate::focus::{FocusId, FocusNode, FocusScopeKind};
 use crate::image::{ImageSurface, ImageSurfaceRegistry, PlaceOptions};
 use crate::input::Key;
@@ -996,7 +998,8 @@ impl<E: Element> BufferComponent for ScrollY<E> {
             height: area.height.saturating_add(self.offset),
         };
         let mut virtual_buffer = Buffer::empty(virtual_area);
-        self.child.render_buffer(virtual_area, &mut virtual_buffer)?;
+        self.child
+            .render_buffer(virtual_area, &mut virtual_buffer)?;
         blit_scrolled(&virtual_buffer, buffer, area, self.offset);
         self.clear_dirty();
         Ok(())
