@@ -17,7 +17,7 @@ Early. The crate is a domain-neutral substrate for terminal applications that ne
 |---|---|
 | `events` | Typed `AppEvent<UserEvent>` categories + unified channel: input, terminal, scheduler, watcher, user events |
 | `component` | `BufferComponent` trait, `ComponentId`, dirty-state invalidation, `Cached<C>` buffer caching |
-| `elements` | First-class buffer-rendered `Element`s, area-transforming containers, overlays, and explicit render/terminal effects |
+| `elements` | First-class buffer-rendered `Element`s, area-transforming containers, overlays, and explicit `RenderEffect`s |
 | `focus` | `FocusManager` with stack-based modal/capturing scopes; `active_scope_id()` for distinguishing modal scopes |
 | `input` | `KeyEvent`, `MouseEvent`, and `InputEvent` mapped from crossterm events |
 | `input_thread` | Detached input thread that pushes `InputEvent::Key` and `TerminalEvent::Resize` into the unified channel |
@@ -83,7 +83,7 @@ effects:
 ```rust,ignore
 let mut media = Stack::vertical("media").with_effect_child(image, StackConstraint::Fill(1));
 
-for effect in media.terminal_effects(area)? {
+for effect in media.render_effects(area)? {
     effect.apply_to_registry(terminal.images())?;
 }
 

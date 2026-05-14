@@ -47,7 +47,7 @@ pub trait ContainerElement: Element {
 }
 
 mod effect;
-pub use effect::{EffectElement, TerminalEffect};
+pub use effect::{EffectElement, RenderEffect};
 
 /// Chainable behavior decorators for elements.
 pub trait ElementExt: Element + Sized {
@@ -532,11 +532,11 @@ impl<E> EffectElement for Panel<E>
 where
     E: EffectElement,
 {
-    fn terminal_effects(&mut self, area: Rect) -> Result<Vec<TerminalEffect>> {
-        self.child.terminal_effects(self.child_area(area))
+    fn render_effects(&mut self, area: Rect) -> Result<Vec<RenderEffect>> {
+        self.child.render_effects(self.child_area(area))
     }
 
-    fn teardown_effects(&mut self) -> Result<Vec<TerminalEffect>> {
+    fn teardown_effects(&mut self) -> Result<Vec<RenderEffect>> {
         self.child.teardown_effects()
     }
 }
@@ -593,14 +593,14 @@ impl<M> ChildElement<M> {
         }
     }
 
-    fn terminal_effects(&mut self, area: Rect) -> Result<Vec<TerminalEffect>> {
+    fn render_effects(&mut self, area: Rect) -> Result<Vec<RenderEffect>> {
         match self {
             Self::Buffer(_) => Ok(Vec::new()),
-            Self::Effect(element) => element.terminal_effects(area),
+            Self::Effect(element) => element.render_effects(area),
         }
     }
 
-    fn teardown_effects(&mut self) -> Result<Vec<TerminalEffect>> {
+    fn teardown_effects(&mut self) -> Result<Vec<RenderEffect>> {
         match self {
             Self::Buffer(_) => Ok(Vec::new()),
             Self::Effect(element) => element.teardown_effects(),
@@ -763,16 +763,16 @@ impl<M> BufferComponent for Stack<M> {
 impl<M> ContainerElement for Stack<M> {}
 
 impl<M> EffectElement for Stack<M> {
-    fn terminal_effects(&mut self, area: Rect) -> Result<Vec<TerminalEffect>> {
+    fn render_effects(&mut self, area: Rect) -> Result<Vec<RenderEffect>> {
         let areas = self.layout_areas(area);
         let mut effects = Vec::new();
         for (child, child_area) in self.children.iter_mut().zip(areas) {
-            effects.extend(child.element.terminal_effects(child_area)?);
+            effects.extend(child.element.render_effects(child_area)?);
         }
         Ok(effects)
     }
 
-    fn teardown_effects(&mut self) -> Result<Vec<TerminalEffect>> {
+    fn teardown_effects(&mut self) -> Result<Vec<RenderEffect>> {
         let mut effects = Vec::new();
         for child in self.children.iter_mut().rev() {
             effects.extend(child.element.teardown_effects()?);
@@ -1064,11 +1064,11 @@ impl<E> EffectElement for Focusable<E>
 where
     E: EffectElement,
 {
-    fn terminal_effects(&mut self, area: Rect) -> Result<Vec<TerminalEffect>> {
-        self.child.terminal_effects(area)
+    fn render_effects(&mut self, area: Rect) -> Result<Vec<RenderEffect>> {
+        self.child.render_effects(area)
     }
 
-    fn teardown_effects(&mut self) -> Result<Vec<TerminalEffect>> {
+    fn teardown_effects(&mut self) -> Result<Vec<RenderEffect>> {
         self.child.teardown_effects()
     }
 }
@@ -1175,11 +1175,11 @@ where
     E: EffectElement,
     E::Message: Clone,
 {
-    fn terminal_effects(&mut self, area: Rect) -> Result<Vec<TerminalEffect>> {
-        self.child.terminal_effects(area)
+    fn render_effects(&mut self, area: Rect) -> Result<Vec<RenderEffect>> {
+        self.child.render_effects(area)
     }
 
-    fn teardown_effects(&mut self) -> Result<Vec<TerminalEffect>> {
+    fn teardown_effects(&mut self) -> Result<Vec<RenderEffect>> {
         self.child.teardown_effects()
     }
 }
@@ -1260,11 +1260,11 @@ impl<E> EffectElement for Padded<E>
 where
     E: EffectElement,
 {
-    fn terminal_effects(&mut self, area: Rect) -> Result<Vec<TerminalEffect>> {
-        self.child.terminal_effects(self.child_area(area))
+    fn render_effects(&mut self, area: Rect) -> Result<Vec<RenderEffect>> {
+        self.child.render_effects(self.child_area(area))
     }
 
-    fn teardown_effects(&mut self) -> Result<Vec<TerminalEffect>> {
+    fn teardown_effects(&mut self) -> Result<Vec<RenderEffect>> {
         self.child.teardown_effects()
     }
 }
@@ -1342,11 +1342,11 @@ impl<E> EffectElement for Bordered<E>
 where
     E: EffectElement,
 {
-    fn terminal_effects(&mut self, area: Rect) -> Result<Vec<TerminalEffect>> {
-        self.child.terminal_effects(self.child_area(area))
+    fn render_effects(&mut self, area: Rect) -> Result<Vec<RenderEffect>> {
+        self.child.render_effects(self.child_area(area))
     }
 
-    fn teardown_effects(&mut self) -> Result<Vec<TerminalEffect>> {
+    fn teardown_effects(&mut self) -> Result<Vec<RenderEffect>> {
         self.child.teardown_effects()
     }
 }
@@ -1926,40 +1926,40 @@ where
     E: EffectElement,
     E::Message: Clone,
 {
-    fn terminal_effects(&mut self, area: Rect) -> Result<Vec<TerminalEffect>> {
+    fn render_effects(&mut self, area: Rect) -> Result<Vec<RenderEffect>> {
         let child_area = self.child_area(area);
-        let effects = self.child.terminal_effects(child_area)?;
+        let effects = self.child.render_effects(child_area)?;
         for effect in &effects {
             match effect {
-                TerminalEffect::PlaceImage { options, .. } => {
+                RenderEffect::PlaceImage { options, .. } => {
                     self.effect_placements
                         .insert((options.image_id, options.placement_id));
                 }
-                TerminalEffect::DeleteImagePlacement {
+                RenderEffect::DeleteImagePlacement {
                     image_id,
                     placement_id,
                 } => {
                     self.effect_placements.remove(&(*image_id, *placement_id));
                 }
-                TerminalEffect::DeletePlacement { placement_id } => {
+                RenderEffect::DeletePlacement { placement_id } => {
                     self.effect_placements
                         .retain(|(_, registered)| registered != placement_id);
                 }
-                TerminalEffect::DeleteAllPlacements | TerminalEffect::ForgetAllImages => {
+                RenderEffect::DeleteAllPlacements | RenderEffect::ForgetAllImages => {
                     self.effect_placements.clear();
                 }
-                TerminalEffect::EnsureImageLoaded { .. } | TerminalEffect::FlushImages => {}
+                RenderEffect::EnsureImageLoaded { .. } | RenderEffect::FlushImages => {}
             }
         }
         Ok(effects)
     }
 
-    fn teardown_effects(&mut self) -> Result<Vec<TerminalEffect>> {
+    fn teardown_effects(&mut self) -> Result<Vec<RenderEffect>> {
         let mut effects = self.child.teardown_effects()?;
         let already_deleted_images: BTreeSet<(u32, u32)> = effects
             .iter()
             .filter_map(|effect| match effect {
-                TerminalEffect::DeleteImagePlacement {
+                RenderEffect::DeleteImagePlacement {
                     image_id,
                     placement_id,
                 } => Some((*image_id, *placement_id)),
@@ -1969,14 +1969,14 @@ where
         let already_deleted_placements: BTreeSet<u32> = effects
             .iter()
             .filter_map(|effect| match effect {
-                TerminalEffect::DeletePlacement { placement_id } => Some(*placement_id),
+                RenderEffect::DeletePlacement { placement_id } => Some(*placement_id),
                 _ => None,
             })
             .collect();
         let all_deleted = effects.iter().any(|effect| {
             matches!(
                 effect,
-                TerminalEffect::DeleteAllPlacements | TerminalEffect::ForgetAllImages
+                RenderEffect::DeleteAllPlacements | RenderEffect::ForgetAllImages
             )
         });
         for (image_id, placement_id) in std::mem::take(&mut self.effect_placements) {
@@ -1984,7 +1984,7 @@ where
                 && !already_deleted_images.contains(&(image_id, placement_id))
                 && !already_deleted_placements.contains(&placement_id)
             {
-                effects.push(TerminalEffect::DeleteImagePlacement {
+                effects.push(RenderEffect::DeleteImagePlacement {
                     image_id,
                     placement_id,
                 });
@@ -2198,7 +2198,7 @@ impl BufferComponent for ImageViewportElement {
 }
 
 impl EffectElement for ImageViewportElement {
-    fn terminal_effects(&mut self, area: Rect) -> Result<Vec<TerminalEffect>> {
+    fn render_effects(&mut self, area: Rect) -> Result<Vec<RenderEffect>> {
         let canvas = self.widget.canvas();
         let area_cells = CellSize::new(area.width, area.height);
         if canvas.cells != area_cells {
@@ -2206,19 +2206,19 @@ impl EffectElement for ImageViewportElement {
                 .update_canvas(CanvasMetrics::new(area_cells, canvas.cell_pixel));
         }
         let Some(placement) = self.widget.placement()? else {
-            return Ok(vec![TerminalEffect::DeleteImagePlacement {
+            return Ok(vec![RenderEffect::DeleteImagePlacement {
                 image_id: self.image_id,
                 placement_id: self.placement_id,
             }]);
         };
         let mut effects = Vec::new();
         if let Some(png) = &self.png {
-            effects.push(TerminalEffect::EnsureImageLoaded {
+            effects.push(RenderEffect::EnsureImageLoaded {
                 image_id: self.image_id,
                 png: png.clone(),
             });
         }
-        effects.push(TerminalEffect::PlaceImage {
+        effects.push(RenderEffect::PlaceImage {
             origin: CellOffset {
                 col: area.x.saturating_add(placement.origin.col),
                 row: area.y.saturating_add(placement.origin.row),
@@ -2229,8 +2229,8 @@ impl EffectElement for ImageViewportElement {
         Ok(effects)
     }
 
-    fn teardown_effects(&mut self) -> Result<Vec<TerminalEffect>> {
-        Ok(vec![TerminalEffect::DeleteImagePlacement {
+    fn teardown_effects(&mut self) -> Result<Vec<RenderEffect>> {
+        Ok(vec![RenderEffect::DeleteImagePlacement {
             image_id: self.image_id,
             placement_id: self.placement_id,
         }])
@@ -2344,11 +2344,11 @@ where
     E: EffectElement,
     E::Message: Clone,
 {
-    fn terminal_effects(&mut self, area: Rect) -> Result<Vec<TerminalEffect>> {
-        self.window.terminal_effects(area)
+    fn render_effects(&mut self, area: Rect) -> Result<Vec<RenderEffect>> {
+        self.window.render_effects(area)
     }
 
-    fn teardown_effects(&mut self) -> Result<Vec<TerminalEffect>> {
+    fn teardown_effects(&mut self) -> Result<Vec<RenderEffect>> {
         self.window.teardown_effects()
     }
 }
@@ -2536,15 +2536,15 @@ impl<M> BufferComponent for Overlay<M> {
 impl<M> ContainerElement for Overlay<M> {}
 
 impl<M> EffectElement for Overlay<M> {
-    fn terminal_effects(&mut self, area: Rect) -> Result<Vec<TerminalEffect>> {
+    fn render_effects(&mut self, area: Rect) -> Result<Vec<RenderEffect>> {
         let mut effects = Vec::new();
         for layer in &mut self.layers {
-            effects.extend(layer.element.terminal_effects(layer.area.unwrap_or(area))?);
+            effects.extend(layer.element.render_effects(layer.area.unwrap_or(area))?);
         }
         Ok(effects)
     }
 
-    fn teardown_effects(&mut self) -> Result<Vec<TerminalEffect>> {
+    fn teardown_effects(&mut self) -> Result<Vec<RenderEffect>> {
         let mut effects = Vec::new();
         for layer in self.layers.iter_mut().rev() {
             effects.extend(layer.element.teardown_effects()?);
@@ -2772,9 +2772,9 @@ mod tests {
     }
 
     impl EffectElement for EffectProbeElement {
-        fn terminal_effects(&mut self, area: Rect) -> Result<Vec<TerminalEffect>> {
+        fn render_effects(&mut self, area: Rect) -> Result<Vec<RenderEffect>> {
             self.areas.borrow_mut().push(area);
-            Ok(vec![TerminalEffect::PlaceImage {
+            Ok(vec![RenderEffect::PlaceImage {
                 origin: CellOffset {
                     col: area.x,
                     row: area.y,
@@ -2794,9 +2794,9 @@ mod tests {
             }])
         }
 
-        fn teardown_effects(&mut self) -> Result<Vec<TerminalEffect>> {
+        fn teardown_effects(&mut self) -> Result<Vec<RenderEffect>> {
             *self.teardowns.borrow_mut() += 1;
-            Ok(vec![TerminalEffect::DeletePlacement {
+            Ok(vec![RenderEffect::DeletePlacement {
                 placement_id: self.placement_id,
             }])
         }
@@ -2850,14 +2850,14 @@ mod tests {
     }
 
     impl EffectElement for ToggleEffectProbeElement {
-        fn terminal_effects(&mut self, area: Rect) -> Result<Vec<TerminalEffect>> {
+        fn render_effects(&mut self, area: Rect) -> Result<Vec<RenderEffect>> {
             if self.delete_next.get() {
-                return Ok(vec![TerminalEffect::DeleteImagePlacement {
+                return Ok(vec![RenderEffect::DeleteImagePlacement {
                     image_id: 3,
                     placement_id: 4,
                 }]);
             }
-            Ok(vec![TerminalEffect::PlaceImage {
+            Ok(vec![RenderEffect::PlaceImage {
                 origin: CellOffset {
                     col: area.x,
                     row: area.y,
@@ -2943,20 +2943,20 @@ mod tests {
             )
             .with_effect_child(effect, StackConstraint::Length(2));
 
-        let effects = stack.terminal_effects(Rect::new(3, 4, 10, 6))?;
+        let effects = stack.render_effects(Rect::new(3, 4, 10, 6))?;
 
         assert_eq!(effect_areas.borrow().as_slice(), &[Rect::new(3, 5, 10, 2)]);
         assert_eq!(effects.len(), 1);
         assert!(matches!(
             &effects[0],
-            TerminalEffect::PlaceImage { origin, options }
+            RenderEffect::PlaceImage { origin, options }
                 if *origin == CellOffset { col: 3, row: 5 }
                     && options.cell_cols == 10
                     && options.cell_rows == 2
         ));
         assert_eq!(
             stack.teardown_effects()?,
-            vec![TerminalEffect::DeletePlacement { placement_id: 42 }]
+            vec![RenderEffect::DeletePlacement { placement_id: 42 }]
         );
         assert_eq!(*teardowns.borrow(), 1);
         Ok(())
@@ -2973,8 +2973,8 @@ mod tests {
         assert_eq!(
             stack.teardown_effects()?,
             vec![
-                TerminalEffect::DeletePlacement { placement_id: 2 },
-                TerminalEffect::DeletePlacement { placement_id: 1 },
+                RenderEffect::DeletePlacement { placement_id: 2 },
+                RenderEffect::DeletePlacement { placement_id: 1 },
             ]
         );
         Ok(())
@@ -3141,19 +3141,19 @@ mod tests {
         let (child, areas, teardowns) = EffectProbeElement::new("effect");
         let mut element = child.with_padding(1).with_border(());
 
-        let effects = element.terminal_effects(Rect::new(10, 5, 10, 5))?;
+        let effects = element.render_effects(Rect::new(10, 5, 10, 5))?;
 
         assert_eq!(areas.borrow().as_slice(), &[Rect::new(12, 7, 6, 1)]);
         assert!(matches!(
             &effects[0],
-            TerminalEffect::PlaceImage { origin, options }
+            RenderEffect::PlaceImage { origin, options }
                 if *origin == CellOffset { col: 12, row: 7 }
                     && options.cell_cols == 6
                     && options.cell_rows == 1
         ));
         assert_eq!(
             element.teardown_effects()?,
-            vec![TerminalEffect::DeletePlacement { placement_id: 42 }]
+            vec![RenderEffect::DeletePlacement { placement_id: 42 }]
         );
         assert_eq!(*teardowns.borrow(), 1);
         Ok(())
@@ -3164,12 +3164,12 @@ mod tests {
         let (child, areas, _teardowns) = EffectProbeElement::new("effect");
         let mut element = child.focusable().with_keymap(KeyMap::new());
 
-        let effects = element.terminal_effects(Rect::new(3, 4, 5, 6))?;
+        let effects = element.render_effects(Rect::new(3, 4, 5, 6))?;
 
         assert_eq!(areas.borrow().as_slice(), &[Rect::new(3, 4, 5, 6)]);
         assert!(matches!(
             &effects[0],
-            TerminalEffect::PlaceImage { origin, options }
+            RenderEffect::PlaceImage { origin, options }
                 if *origin == CellOffset { col: 3, row: 4 }
                     && options.cell_cols == 5
                     && options.cell_rows == 6
@@ -3182,12 +3182,12 @@ mod tests {
         let (child, areas, _teardowns) = EffectProbeElement::new("effect");
         let mut panel = Panel::new("panel", child).padding(1);
 
-        let effects = panel.terminal_effects(Rect::new(0, 0, 10, 5))?;
+        let effects = panel.render_effects(Rect::new(0, 0, 10, 5))?;
 
         assert_eq!(areas.borrow().as_slice(), &[Rect::new(2, 2, 6, 1)]);
         assert!(matches!(
             &effects[0],
-            TerminalEffect::PlaceImage { origin, options }
+            RenderEffect::PlaceImage { origin, options }
                 if *origin == CellOffset { col: 2, row: 2 }
                     && options.cell_cols == 6
                     && options.cell_rows == 1
@@ -3200,12 +3200,12 @@ mod tests {
         let (child, areas, teardowns) = EffectProbeElement::new("effect");
         let mut modal = Modal::new("modal", child);
 
-        let effects = modal.terminal_effects(Rect::new(2, 3, 4, 5))?;
+        let effects = modal.render_effects(Rect::new(2, 3, 4, 5))?;
 
         assert_eq!(areas.borrow().as_slice(), &[Rect::new(2, 3, 4, 5)]);
         assert!(matches!(
             &effects[0],
-            TerminalEffect::PlaceImage { origin, options }
+            RenderEffect::PlaceImage { origin, options }
                 if *origin == CellOffset { col: 2, row: 3 }
                     && options.placement_id == 42
         ));
@@ -3216,7 +3216,7 @@ mod tests {
 
         assert_eq!(
             modal.teardown_effects()?,
-            vec![TerminalEffect::DeletePlacement { placement_id: 42 }]
+            vec![RenderEffect::DeletePlacement { placement_id: 42 }]
         );
         assert_eq!(*teardowns.borrow(), 1);
         assert!(modal.window().registered_effect_placements().is_empty());
@@ -3230,13 +3230,13 @@ mod tests {
             .with_layer(ProbeElement::new("buffer", "buffer"), None)
             .with_effect_layer(effect, Some(Rect::new(5, 6, 7, 8)));
 
-        let effects = overlay.terminal_effects(Rect::new(0, 0, 20, 10))?;
+        let effects = overlay.render_effects(Rect::new(0, 0, 20, 10))?;
 
         assert_eq!(areas.borrow().as_slice(), &[Rect::new(5, 6, 7, 8)]);
         assert_eq!(effects.len(), 1);
         assert!(matches!(
             &effects[0],
-            TerminalEffect::PlaceImage { origin, options }
+            RenderEffect::PlaceImage { origin, options }
                 if *origin == CellOffset { col: 5, row: 6 }
                     && options.cell_cols == 7
                     && options.cell_rows == 8
@@ -3255,8 +3255,8 @@ mod tests {
         assert_eq!(
             overlay.teardown_effects()?,
             vec![
-                TerminalEffect::DeletePlacement { placement_id: 2 },
-                TerminalEffect::DeletePlacement { placement_id: 1 },
+                RenderEffect::DeletePlacement { placement_id: 2 },
+                RenderEffect::DeletePlacement { placement_id: 1 },
             ]
         );
         Ok(())
@@ -3411,16 +3411,16 @@ mod tests {
         let image = ImageViewportElement::new("image", 7, 9, widget).with_png(b"png".to_vec());
         let mut window = Window::new("window", image);
 
-        let effects = window.terminal_effects(Rect::new(0, 0, 4, 2))?;
+        let effects = window.render_effects(Rect::new(0, 0, 4, 2))?;
         assert!(effects
             .iter()
-            .any(|effect| matches!(effect, TerminalEffect::PlaceImage { options, .. } if options.placement_id == 9)));
+            .any(|effect| matches!(effect, RenderEffect::PlaceImage { options, .. } if options.placement_id == 9)));
         assert!(window.registered_effect_placements().contains(&(7, 9)));
 
         let teardown = window.teardown_effects()?;
         assert_eq!(
             teardown,
-            vec![TerminalEffect::DeleteImagePlacement {
+            vec![RenderEffect::DeleteImagePlacement {
                 image_id: 7,
                 placement_id: 9,
             }]
@@ -3434,15 +3434,15 @@ mod tests {
         let (child, delete_next) = ToggleEffectProbeElement::new("effect");
         let mut window = Window::new("window", child);
 
-        window.terminal_effects(Rect::new(0, 0, 4, 2))?;
+        window.render_effects(Rect::new(0, 0, 4, 2))?;
         assert!(window.registered_effect_placements().contains(&(3, 4)));
 
         delete_next.set(true);
-        let effects = window.terminal_effects(Rect::new(0, 0, 4, 2))?;
+        let effects = window.render_effects(Rect::new(0, 0, 4, 2))?;
 
         assert_eq!(
             effects,
-            vec![TerminalEffect::DeleteImagePlacement {
+            vec![RenderEffect::DeleteImagePlacement {
                 image_id: 3,
                 placement_id: 4,
             }]
@@ -3457,11 +3457,11 @@ mod tests {
         let (child, _delete_next) = ToggleEffectProbeElement::new("effect");
         let mut window = Window::new("window", child);
 
-        window.terminal_effects(Rect::new(0, 0, 4, 2))?;
+        window.render_effects(Rect::new(0, 0, 4, 2))?;
 
         assert_eq!(
             window.teardown_effects()?,
-            vec![TerminalEffect::DeleteImagePlacement {
+            vec![RenderEffect::DeleteImagePlacement {
                 image_id: 3,
                 placement_id: 4,
             }]
@@ -3533,15 +3533,15 @@ mod tests {
         let mut element =
             ImageViewportElement::new("image", 7, 9, widget).with_png(b"png".to_vec());
 
-        let effects = element.terminal_effects(Rect::new(10, 3, 4, 2))?;
+        let effects = element.render_effects(Rect::new(10, 3, 4, 2))?;
 
         assert!(matches!(
             &effects[0],
-            TerminalEffect::EnsureImageLoaded { image_id: 7, .. }
+            RenderEffect::EnsureImageLoaded { image_id: 7, .. }
         ));
         assert!(matches!(
             &effects[1],
-            TerminalEffect::PlaceImage { origin, options }
+            RenderEffect::PlaceImage { origin, options }
                 if *origin == CellOffset { col: 10, row: 3 }
                     && options.image_id == 7
                     && options.placement_id == 9
