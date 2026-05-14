@@ -4,7 +4,7 @@ Opinionated middleware for building terminal UI applications. Sits on top of [`r
 
 ## Status
 
-Early. The crate is a domain-neutral substrate for terminal applications that need typed input, focus scopes, buffer-rendered components, image placement, layout math, scheduling, and test utilities without adopting a full application framework.
+Early. The crate is a domain-neutral substrate for terminal applications that need typed input, focus scopes, buffer-rendered components, explicit render effects, image placement, layout math, scheduling, and test utilities without adopting a full application framework. Local terminal sessions are the implemented target today; the buffer/effect split is intended to keep future remote renderers possible.
 
 ## Documents
 
@@ -16,10 +16,10 @@ Early. The crate is a domain-neutral substrate for terminal applications that ne
 | Module | Provides |
 |---|---|
 | `events` | Typed `AppEvent<UserEvent>` categories + unified channel: input, terminal, scheduler, watcher, user events |
-| `component` | `Component` / `BufferComponent` traits, `ComponentId`, dirty-state invalidation, `Cached<C>` buffer caching |
-| `elements` | First-class buffer-rendered `Element`s, decorators, `Text`, `Panel`, `Window`, `Stack`, overlays, and typed terminal effects |
+| `component` | `BufferComponent` trait, `ComponentId`, dirty-state invalidation, `Cached<C>` buffer caching |
+| `elements` | First-class buffer-rendered `Element`s, area-transforming containers, overlays, and explicit render/terminal effects |
 | `focus` | `FocusManager` with stack-based modal/capturing scopes; `active_scope_id()` for distinguishing modal scopes |
-| `input` | `Key` enum mapped from crossterm events |
+| `input` | `KeyEvent`, `MouseEvent`, and `InputEvent` mapped from crossterm events |
 | `input_thread` | Detached input thread that pushes `InputEvent::Key` and `TerminalEvent::Resize` into the unified channel |
 | `keymap` | `KeyMap<C>` registry generic over command type, `KeyTrigger -> C` declarative bindings, last-binding-wins |
 | `tty` | `terminal_metrics()` reading both cell and pixel dimensions via TIOCGWINSZ |
@@ -36,9 +36,10 @@ Early. The crate is a domain-neutral substrate for terminal applications that ne
 
 ## Element composition
 
-Elements render into ratatui buffers. `Panel` is presentational chrome,
-`Window` is the lifecycle/key/effect boundary, `Stack` lays out children, and
-`Grid` is the selectable collection primitive.
+Elements render into ratatui buffers and keep terminal-facing effects explicit.
+`Panel` is presentational chrome, `Window` currently groups lifecycle and
+effect teardown, `Stack` lays out children, and `Grid` is the selectable
+collection primitive.
 
 ```rust
 use ratatui::buffer::Buffer;
@@ -76,7 +77,8 @@ fn render_picker(area: Rect, buffer: &mut Buffer, items: &[&str], active: Option
 ```
 
 Effectful children stay explicit. Use the effect-aware child/layer APIs when a
-container needs to forward terminal side effects:
+container needs to forward image placement, teardown, or other renderer-facing
+effects:
 
 ```rust,ignore
 let mut media = Stack::vertical("media").with_effect_child(image, StackConstraint::Fill(1));
@@ -92,6 +94,10 @@ for effect in media.teardown_effects()? {
 
 `scroll_y` is buffer-only for now. Scrolled image/effect children need explicit
 clipping and source-cropping semantics before they can be forwarded safely.
+
+This effect path is intentionally separate from direct terminal writes. Today
+effects apply to the local `ImageSurfaceRegistry`; later they can become the
+wire intent consumed by a local renderer for a remote app.
 
 ## ImageBox
 
@@ -135,6 +141,7 @@ These public surfaces were pruned after they showed no durable consumer demand. 
 ## Out of scope (today)
 
 - Image surfaces other than Kitty graphics (Sixel, iTerm2)
+- Remote renderer protocol, SSH launcher, and client-side helper binaries
 - Async runtimes (tokio/async-std) - uses sync threads + channels
 - Full component tree runtime orchestration
 - Generic focus traversal, theming, additional widgets (list/table/tree/tabs), runtime config bundles, subscription primitives, periodic tick producers - all deliberately removed pending consumer demand

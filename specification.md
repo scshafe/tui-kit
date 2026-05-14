@@ -10,6 +10,9 @@ ratatui and crossterm. It provides the lower-level services that terminal apps
 commonly rebuild: input normalization, keymaps, focus scopes, dirty-aware
 components, cell/pixel layout math, inline image lifecycle management,
 background scheduling, file watching, status-line layout, and test utilities.
+The current runtime target is a local terminal session, but the public
+boundaries should remain structured enough to support a future local-renderer
+client for remote applications.
 
 tui-kit is intentionally domain-neutral. It does not know what kind of data an
 application displays, how that data is loaded, or what commands mean.
@@ -21,6 +24,8 @@ application displays, how that data is loaded, or what commands mean.
   escape sequences.
 - Treat cell geometry and pixel geometry as first-class values.
 - Make image transmission and placement explicit so callers control lifecycle.
+- Preserve a structured render/effect boundary so terminal-facing behavior can
+  be adapted to local terminals, test surfaces, and future remote renderers.
 - Provide reusable widgets and primitives without imposing an application
   runtime, state model, or domain object model.
 - Prefer synchronous, dependency-light building blocks that can be composed by
@@ -34,6 +39,8 @@ application displays, how that data is loaded, or what commands mean.
 - Automatic persistence, settings discovery, or app-specific configuration
   schemas.
 - Browser, GUI, or web rendering.
+- SSH clients, remote-render protocols, or persistent agents in this
+  specification version.
 - Image protocols other than the Kitty graphics protocol unless a real consumer
   justifies the added surface area.
 
@@ -47,9 +54,9 @@ loop and decide how events map to commands.
 
 ### 4.2 Input and Keymaps
 
-The `input` module normalizes crossterm keyboard events into a small `Key`
-enum. The `input_thread` module can spawn a blocking input reader that forwards
-keyboard and resize events into an app event channel.
+The `input` module normalizes crossterm events into `KeyEvent`, `MouseEvent`,
+and `InputEvent`. The `input_thread` module can spawn a blocking input reader
+that forwards keyboard, mouse, and resize events into an app event channel.
 
 The `keymap` module maps typed triggers to caller-owned command values. Last
 binding wins so applications can layer user overrides on top of defaults.
@@ -66,9 +73,10 @@ The `component` module defines dirty-aware component traits and the `Cached<C>`
 wrapper for buffer caching. Components render into ratatui buffers and report
 typed outcomes to their owner.
 
-The `elements` module provides composable buffer-rendered elements such as text,
-panels, windows, stacks, and overlay layers. Effectful children remain explicit
-so terminal side effects cannot be hidden in a pure buffer render path.
+The `elements` module provides composable buffer-rendered elements and explicit
+render effects. Its durable purpose is to keep area-transforming composition
+and terminal-facing effects together without hiding those effects in pure
+buffer rendering. It is not a retained application runtime.
 
 ### 4.5 Layout
 
@@ -85,6 +93,11 @@ explicit teardown.
 
 The `terminal` module wraps ratatui/crossterm terminal lifecycle setup,
 alternate-screen/raw-mode cleanup, image flushing, and terminal metrics.
+
+Future renderer backends may consume the same buffers and render effects through
+a structured transport instead of writing terminal escape sequences directly.
+That protocol is not specified here, but current APIs should avoid assuming
+that every renderer is the process-local `stdout`.
 
 ### 4.7 Widgets
 
@@ -119,6 +132,9 @@ image surfaces, and deterministic scheduler tools for tests.
 - Pure buffer rendering must not emit terminal escape sequences.
 - Terminal effects, image placement, and teardown must be explicit values or
   explicit method calls.
+- Effect-carrying composition must keep render intent serializable in principle:
+  no ambient access to terminal globals, application state, or arbitrary local
+  commands.
 - Dirty state should distinguish repaint needs from image-placement changes
   where widgets can do so cheaply.
 - APIs crossing application boundaries should use typed IDs or typed geometry
@@ -130,7 +146,8 @@ image surfaces, and deterministic scheduler tools for tests.
 tui-kit targets terminal applications using ratatui 0.29 and crossterm 0.28.
 The crate is early and may still revise APIs, but changes should preserve the
 core split between domain-neutral primitives and caller-owned application
-behavior.
+behavior. Local terminal rendering is the implemented compatibility target
+today; remote-render clients remain future work.
 
 ## 7. Out of Scope for This Specification
 

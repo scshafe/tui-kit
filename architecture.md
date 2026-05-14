@@ -16,7 +16,10 @@ terminal/input backend
 typed events -> app-owned command mapping -> app-owned state
         |                                      |
         |                                      v
-        +----------------------------> tui-kit render/layout/image helpers
+        +----------------------------> tui-kit render/layout/effect helpers
+                                                |
+                                                v
+                                renderer backend (local terminal today)
 ```
 
 The central design rule is that reusable primitives stay domain-neutral. A
@@ -33,7 +36,7 @@ an application selected a row or what a selected image represents.
 | `keymap` | Declarative key trigger to caller command mapping |
 | `focus` | Stack-based modal/capturing focus scopes |
 | `component` | Dirty-aware components and cached buffer rendering |
-| `elements` | Composable buffer-rendered elements and explicit effect layers |
+| `elements` | Composable buffer-rendered elements and explicit render-effect layers |
 | `layout` | Cell/pixel metrics, placements, transforms, crops, viewport math |
 | `image` | Kitty image registry and image-surface abstraction |
 | `terminal` | Crossterm/ratatui terminal lifecycle plus image flushing |
@@ -52,17 +55,26 @@ using the area they are given. They may return typed outcomes from input
 handling, but rendering itself should not mutate terminal state outside the
 buffer.
 
-Image rendering is explicitly planned and applied:
+Terminal-facing rendering is explicitly planned and applied:
 
 1. A widget computes text/border output for a ratatui buffer.
 2. The widget or owner computes an image placement plan from source pixels,
    canvas metrics, zoom, and crop state.
-3. The terminal layer applies that plan to an `ImageSurface`.
-4. Teardown is applied explicitly when an image leaves the screen or a mode
+3. Effect-capable elements expose image upload, placement, and teardown as
+   explicit effect values.
+4. A renderer backend applies those effects to an `ImageSurface` or another
+   compatible surface.
+5. Teardown is applied explicitly when an image leaves the screen or a mode
    closes.
 
 This split keeps tests deterministic and prevents hidden terminal side effects
 from leaking out of ordinary buffer rendering.
+
+The same split is also the compatibility path for future remote rendering.
+A client-side renderer can consume buffer cells and render effects over a
+structured transport, while the application keeps the same event, layout, and
+component boundaries. The current repository does not implement that transport;
+the architecture should avoid closing the door on it.
 
 ## 4. Geometry Model
 
@@ -113,7 +125,12 @@ The `terminal` module owns low-level terminal lifecycle responsibilities:
 Apps can bypass the high-level terminal wrapper and consume lower-level modules
 directly if they need a custom backend.
 
-## 8. Image Lifecycle
+The terminal wrapper is the concrete local backend, not the conceptual limit of
+the rendering model. Future backends may apply the same buffers and render
+effects from a client process, for example when an app runs on a remote host
+and a local helper owns the real terminal.
+
+## 8. Render Effects and Image Lifecycle
 
 The image layer is centered on stable image IDs and placement IDs. Callers can:
 
@@ -124,6 +141,11 @@ The image layer is centered on stable image IDs and placement IDs. Callers can:
 
 This model favors responsive interactions where a large image is cached in the
 terminal and only placement/source-rectangle data changes.
+
+`elements` exists to preserve the composition side of this model: containers
+that transform child areas must also transform effect origins and group
+teardown. It should stay narrow. It should not grow into a retained component
+tree runtime, app state container, or product-specific UI framework.
 
 ## 9. Scheduler and Watcher
 
@@ -142,6 +164,7 @@ The testkit mirrors the public boundaries:
 - render widgets into buffers and assert cells;
 - script typed events;
 - use mock image surfaces to assert image placement and teardown;
+- assert render-effect forwarding through area-transforming containers;
 - run deterministic scheduler flows.
 
 Tests should verify terminal-facing behavior at the boundary rather than by
@@ -153,6 +176,8 @@ New public surfaces should meet at least one of these tests:
 
 - they remove repeated code from more than one caller;
 - they encode a terminal or layout invariant that is easy to get wrong;
+- they preserve the buffer/effect boundary needed by local, test, or future
+  remote renderer backends;
 - they expose a smaller, more testable boundary for an existing toolkit
   responsibility.
 
