@@ -155,7 +155,7 @@ signs off on.
 5. c4tui no longer carries placeholders for unresolved tui-kit boundaries:
    `NavPicker` consolidation has landed, modal handling is unified around the
    smallest useful abstraction (the `Modal` trait sketched in
-   `docs/superpowers/plans/2026-05-12-phase-3-navpicker-modal-image-elements.md`
+   `/Users/coleshaffer/Projects/c4tui/docs/superpowers/plans/2026-05-12-phase-3-navpicker-modal-image-elements.md`
    or its successor), the single surviving image-viewport widget is wired
    through c4tui, and `LinkDirectory` has shipped.
 6. The operator has signed off on local + SSH + SSH-into-container +
@@ -315,7 +315,7 @@ durable.
   (`c4tui/src/picker.rs:ViewPicker`, `c4tui/src/connection_picker.rs:
   ConnectionPicker`, and an inline child-view picker in `c4tui/src/app.rs`)
   and three modal slot lifecycles, per
-  `docs/superpowers/plans/2026-05-12-phase-3-navpicker-modal-image-elements.md`
+  `/Users/coleshaffer/Projects/c4tui/docs/superpowers/plans/2026-05-12-phase-3-navpicker-modal-image-elements.md`
   Decision A-D. **Confidence: HIGH** (verified by grep of `c4tui/src/app.rs`
   lines 4-10, 30-31, 73-74, 312-313).
 - `LinkDirectory` does not yet exist in c4tui.
@@ -335,7 +335,7 @@ durable.
 1. **NavPicker consolidation.** Replace `ViewPicker`, `ConnectionPicker`, and
    the inline child-view picker with one `NavPicker<T: NavItem>` over a
    union `NavTarget` enum. Specifics are pre-decided in
-   `docs/superpowers/plans/2026-05-12-phase-3-navpicker-modal-image-elements.md`
+   `/Users/coleshaffer/Projects/c4tui/docs/superpowers/plans/2026-05-12-phase-3-navpicker-modal-image-elements.md`
    Decisions A-D; use them or supersede them per-task. Result: one picker
    type, one render path, one keymap, one modal slot.
 2. **Modal handling unified.** One `Modal` trait, one `ActiveModal` enum,
