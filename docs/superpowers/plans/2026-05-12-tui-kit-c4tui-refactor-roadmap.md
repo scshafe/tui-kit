@@ -1,8 +1,15 @@
 # tui-kit + c4tui Refactor Roadmap
 
+> **Status:** SUPERSEDED for forward planning. Use
+> [`2026-05-13-fresh-library-author-plan.md`](./2026-05-13-fresh-library-author-plan.md)
+> and
+> [`2026-05-13-library-author-direction.md`](./2026-05-13-library-author-direction.md)
+> as the active direction. This document remains as historical context for the
+> 2026-05-12 refactor sequence.
+
 > **For agentic workers:** This is a phased *roadmap*, not a task-by-task plan. Each phase contains an **Architect handoff prompt** block. When you're ready to execute a phase, fire that prompt at the `the-architect` agent (subagent_type: `the-architect`) to produce the detailed task-by-task plan in the standard writing-plans style. Then execute the resulting per-phase plan via `superpowers:subagent-driven-development`.
 
-**Goal:** Execute the seventeen refactors from the 2026-05-12 architecture review of tui-kit and c4tui, in dependency order, terminating in a clean implementation of the `LinkDirectory` keyboard-first navigation model.
+**Goal:** Execute the seventeen refactors from the 2026-05-12 architecture review of tui-kit and c4tui, in dependency order, terminating in a clean implementation of the `LinkDirectory` keyboard-first navigation model, while preserving tui-kit's longer-term path toward local and remote renderer backends.
 
 **Operating constraint (set by user):** *No backwards-compatibility shims, no deprecation periods, no migration layers, no preserving old names "for a release."* Rip-and-replace at the source. We're optimizing for end state, not graceful transition. Per-phase architect plans must assume both repos can be edited atomically and that downstream breakage inside the same workspace is fine as long as the final state of the phase compiles and tests pass.
 
@@ -11,6 +18,27 @@
 **Repos:**
 - tui-kit: `/Users/coleshaffer/Projects/tui-kit` (domain-neutral terminal UI substrate)
 - c4tui: `/Users/coleshaffer/Projects/c4tui` (consumer of tui-kit; product surface)
+
+## Directional update — local now, remote-capable later
+
+After the initial Phase 3 planning, the target direction expanded: tui-kit
+should remain a terminal-first substrate, but its rendering boundaries should
+also support a future client-side renderer for apps running over SSH. That
+future is **not** Phase 3 work. It changes the evaluation of `elements`: the
+useful concept is not a speculative UI DSL, but a composable buffer-rendering
+tree that can emit explicit render effects such as image upload, placement,
+teardown, and cleanup.
+
+The consequence for the roadmap:
+
+- Do not delete `elements` merely because `NavPicker` does not need it.
+- Do not port `NavPicker` through `elements`; pickers remain app-owned
+  `Grid`/ratatui components.
+- Preserve and later reshape the render-effect nucleus: `EffectElement`,
+  `TerminalEffect`/future `RenderEffect`, area-transforming containers, and
+  image viewport effect wrappers.
+- Defer SSH/client/runtime work until the current c4tui refactor sequence has
+  produced cleaner modal, command, link-directory, and view-store boundaries.
 
 ---
 
@@ -24,9 +52,13 @@
 | 4 | Command + Effect cleanup | #8, #11 | c4tui | Low-medium |
 | 5 | LinkDirectory implementation | #6 | c4tui | Medium |
 | 6 | ViewStore split | #12 | c4tui | Medium |
-| 7 | Documentation + retention tooling | #13, #14, #15, #16, #17 | both | Low (doc-heavy) |
+| 7 | Documentation + retention tooling + render-effect docs | #13, #14, #15, #16, #17 | both | Low (doc-heavy) |
+| 8 | RenderEffect + renderer backend model | New direction | tui-kit | Medium |
+| 9 | `tui-kit-cli` remote launcher prototype | New direction | tui-kit | High |
 
-All 17 items from the review are accounted for. The centerpiece is Phase 3 (NavPicker + modal-slot unification + image-widget winner + elements decision); Phase 5 (LinkDirectory) is what the whole sequence is in service of.
+All 17 items from the review are accounted for across Phases 1-7. Phases 8-9
+are new directional phases for remote-capable rendering and are intentionally
+sequenced after the c4tui cleanup work.
 
 ---
 
@@ -38,7 +70,7 @@ Low-risk, mostly tui-kit-internal cleanups that remove duplication and dead surf
 
 ### Items covered
 
-- **#3** — Collapse `Component` / `BufferComponent` / `Element` into one trait. After the merge, `Element<Message=M>` is `BufferComponent<Event=Key, Message=M>`. Drop the Frame-based `Component`; call `frame.buffer_mut()` at use sites.
+- **#3** — Collapse `Component` / `BufferComponent` / `Element` into one trait. After the merge and Phase 2 input split, `Element<Message=M>` is `BufferComponent<Event=KeyEvent, Message=M>`. Drop the Frame-based `Component`; call `frame.buffer_mut()` at use sites.
 - **#9** — Slim `prelude.rs` to constructors + traits. Move config types (`ImageBoxPlacement`, `ImageViewportPlacement`, `ImageViewportError`, `ScaledPixelOffset`, `UnscaledPixelOffset`, all the basis/policy enums, etc.) behind module paths. Glob-imports become safe again.
 - **#10** — Reduce `ImageProtocol` from `{ Kitty, Sixel, ITerm2, Noop }` to `{ Kitty, Noop }`. Sixel/iTerm2 re-added alongside real consumers if/when those arrive.
 
@@ -48,7 +80,7 @@ These three are cheap, independent of the rest of the work, and shrink the publi
 
 ### End state of phase
 
-- One trait in `src/component.rs` (or wherever it lands); `elements::Element` is a type alias / parameterization, not a separate trait. (The `elements` module *itself* is not yet deleted or refactored — that decision lives in Phase 3.)
+- One trait in `src/component.rs` (or wherever it lands); `elements::Element` is a type alias / parameterization, not a separate trait. The `elements` module itself remains in play for the render-effect path and is preserved in Phase 3.
 - Prelude is half its current size; config/error types are reached via `tui_kit::image_box::Placement` etc.
 - `ImageProtocol` has two variants; `ImageBackendPreference::Explicit(Sixel)` no longer compiles (it gets deleted).
 - All tui-kit tests pass; c4tui builds against the new tui-kit (may require small import-path follow-ups in c4tui, which this phase is allowed to do).
@@ -66,8 +98,8 @@ Roadmap document: /Users/coleshaffer/Projects/tui-kit/docs/superpowers/plans/202
 Phase 1 scope — three items from the 2026-05-12 architecture review:
 
   #3 — Collapse Component / BufferComponent / Element into a single trait.
-       After the merge, `elements::Element<Message=M>` is precisely
-       `BufferComponent<Event=Key, Message=M>`. Drop the Frame-based
+       After the merge and Phase 2 input split, `elements::Element<Message=M>`
+       is precisely `BufferComponent<Event=KeyEvent, Message=M>`. Drop the Frame-based
        `Component` trait entirely; call sites do `frame.buffer_mut()`. Keep
        `Cached<C>` unchanged at the API level (it already wraps
        BufferComponent).
@@ -218,11 +250,8 @@ The centerpiece. Four items that the architect explicitly noted are cheaper toge
 
 ### Items covered
 
-- **#1** — Build `NavPicker<T: NavItem>` in c4tui (or in tui-kit if Phase 3 decides elements is the right home — see below). Port `ViewPicker` → `NavPicker<ViewNavItem>`, `ConnectionPicker` → `NavPicker<ConnectionNavItem>`, multi-child-view picker effect → `NavPicker<ChildViewNavItem>`. Three near-duplicate implementations collapse into one parameterized component.
-- **#2** — *Decide the elements module's fate as part of this work.* Two options:
-  - **(B) Validate by porting NavPicker through `elements`.** If `NavPicker<T>` reads cleaner as `Window::new(Stack::vertical(…).with_child(Grid::new(…)))` than as direct ratatui rendering, elements has earned its place.
-  - **(A) Delete the entire `elements` module.** 3,763 lines gone. NavPicker is built directly on `widgets::grid` + ratatui primitives (the way the current pickers are).
-  - The architect should commit to a direction at the start of the phase plan and not switch midway. The user's "fast as possible" preference is a tiebreaker that favors (A).
+- **#1** — Build `NavPicker<T: NavItem>` in c4tui. Port `ViewPicker` → `NavPicker<ViewNavItem>`, `ConnectionPicker` → `NavPicker<ConnectionNavItem>`, multi-child-view picker effect → `NavPicker<ChildViewNavItem>`. Three near-duplicate implementations collapse into one parameterized component.
+- **#2** — Preserve the `elements` render-effect nucleus. Earlier drafts framed this as "port NavPicker through elements or delete elements." That is no longer the right test. NavPicker stays direct-ratatui/`Grid`; `elements` stays because future renderer backends need composable buffer rendering plus explicit render effects. Phase 3 should only do narrow documentation/checkpoint work here, not a broad elements refactor.
 - **#4** — Pick a winner between `ImageBox` and `ImageViewport`; delete the loser. c4tui's `ViewStore::viewports` migrates to the winner. The prelude updates accordingly (this re-touches Phase 1's prelude work, which is fine).
 - **#5** — Unify c4tui's three modal-slot lifecycles into one `ActiveModal` enum + one `render_modal(&mut dyn BufferComponent<Event=KeyEvent>)` method on `TerminalBackend`. The `picker_slot`, `connection_picker_slot`, `log_slot` (and the dialog) collapse. Each NavPicker variant routes its `NavOutcome::Select` through a slot-attached callback.
 
@@ -235,7 +264,8 @@ All four items touch the same code paths. The picker structs, the modal slots in
 - One `NavPicker<T>` component with `NavOutcome<T> { Continue, Select(T), Cancel }`. Three call sites use it.
 - One `ActiveModal` enum on `App`. One `render_modal` method on `TerminalBackend`. One `handle_modal_key` method on `App`.
 - One image-viewport widget in tui-kit; the other is deleted.
-- Either: `elements` module is gone, *or* `elements` is the foundation NavPicker is built on. Not both, not partial.
+- `elements` remains present as a render/effect substrate. It is not validated
+  by NavPicker, and it is not expanded into a framework in this phase.
 - `FakeTerminalBackend` shrinks proportionally (eleven non-core methods → ~five).
 - All tests pass in both repos. New test files: NavPicker behavior, ActiveModal routing.
 
@@ -274,28 +304,21 @@ Phase 3 scope — four items from the architecture review, executed together:
        the three current pickers expose, dropping any that exist in only
        one and aren't worth generalizing.
 
-  #2 — Decide the elements module's fate AT THE START of the phase plan
-       and commit to a direction:
+  #2 — Preserve the elements render-effect nucleus.
 
-         (A) Delete the entire src/elements.rs file. NavPicker is built
-             directly on widgets::grid + ratatui primitives. Prelude is
-             cleaned of element re-exports. Spec/architecture/README are
-             updated to remove the elements section.
+       Updated direction: do NOT delete src/elements.rs in Phase 3, and do
+       NOT use NavPicker as the validation test for elements. NavPicker is
+       mostly text/grid UI and should be built directly on widgets::grid +
+       ratatui primitives. The useful `elements` surface is the
+       effect-carrying render tree: explicit TerminalEffect/future
+       RenderEffect values, EffectElement, area-transforming containers that
+       forward effects, ImageViewportElement, and grouped image teardown.
 
-         (B) Use elements as the substrate for NavPicker. Port NavPicker
-             through Window + Stack + Grid (or whatever subset of elements
-             genuinely improves the result). The benchmark for "improves
-             the result" is: does the NavPicker implementation read more
-             clearly than the equivalent direct-ratatui version would? If
-             yes, elements lives. If after trying it's not obviously better,
-             switch to (A) — do not ship a half-validated abstraction.
-
-       USER PREFERENCE: bias toward (A) (delete). The user said "get to
-       end goal as fast as possible" and the architect noted speculative
-       surfaces have been costing repo coherence. Choose (B) only if you
-       can articulate, in the plan header, a concrete reason NavPicker is
-       genuinely better expressed through Window/Stack/Grid than directly
-       in ratatui. If you can't, choose (A).
+       Phase 3 should leave elements compiling, document why it is retained,
+       and avoid broad reshaping. Later remote-renderer phases will decide
+       whether to rename TerminalEffect to RenderEffect, move local
+       application to an adapter, and shrink Window into a smaller
+       EffectScope.
 
   #4 — Pick the winning image-viewport widget and delete the loser.
        Current state:
@@ -379,7 +402,7 @@ Files to ground-truth (read all of these before writing the plan):
   tui-kit/src/widgets/grid.rs         (NavPicker substrate)
   tui-kit/src/widgets/image_box.rs    (#4 winner candidate)
   tui-kit/src/widgets/image_viewport.rs (#4 winner candidate)
-  tui-kit/src/elements.rs             (#2 decision target)
+  tui-kit/src/elements.rs             (#2 preservation checkpoint target)
   tui-kit/src/component.rs            (unified trait from Phase 1)
   tui-kit/src/prelude.rs              (re-touched here for #4)
 
@@ -388,15 +411,15 @@ Save plan to:
     2026-05-12-phase-3-navpicker-modal-image-elements.md
 
 Plan structure expectations:
-- Header section that BAKES IN the #2 decision (delete vs port) and the #4
-  decision (image_box vs image_viewport winner), with one paragraph of
-  justification for each. These decisions are not subtasks; they're plan
-  preconditions.
+- Header section that BAKES IN the #2 decision (preserve the render-effect
+  nucleus; do not port NavPicker through elements) and the #4 decision
+  (image_box vs image_viewport winner), with one paragraph of justification
+  for each. These decisions are not subtasks; they're plan preconditions.
 - File-structure section listing every file created or modified.
 - Tasks ordered as: (i) introduce NavPicker shape (TDD-able in isolation
   before any porting); (ii) migrate first picker, run tests; (iii) migrate
   second picker; (iv) introduce ActiveModal; (v) collapse trait methods;
-  (vi) image-widget swap; (vii) elements decision (delete or use); (viii)
+  (vi) image-widget swap; (vii) elements preservation checkpoint; (viii)
   full verification.
 - Each task self-contained with complete code, exact paths, TDD where
   applicable, frequent commits.
@@ -721,16 +744,19 @@ export-directory lifetime is intact.
 
 ---
 
-## Phase 7 — Documentation + retention tooling
+## Phase 7 — Documentation + retention tooling + render-effect docs
 
 ### Scope
 
-Doc-heavy and tooling-light phase that locks in everything the prior phases produced.
+Doc-heavy and tooling-light phase that locks in everything the prior phases
+produced, and explicitly records the render/effect/backend split that will feed
+the later remote-renderer phases.
 
 ### Items covered
 
 - **#13** — Promote the "real consumer" rule from an addition test to a retention test. Add a CI audit (a small Rust script or `cargo` plugin invocation, or a shell script) that lists tui-kit's public types and flags any with zero references in c4tui or in tui-kit's own tests.
-- **#14** — Reconcile README + specification.md + architecture.md in both repos against the actual post-refactor code state. After Phase 3 in particular, the docs need to match reality: which trait, which image widget, whether elements exists.
+- **#14** — Reconcile README + specification.md + architecture.md in both repos against the actual post-refactor code state. After Phase 3 in particular, the docs need to match reality: which trait, which image widget, and the fact that `elements` remains as a render-effect substrate rather than a NavPicker substrate.
+- **New direction** — Add a concise render-backend note to tui-kit docs: local terminal rendering is implemented today; remote-renderer protocol and SSH client tooling are future work; render effects are the bridge.
 - **#15** — Archive or restructure `c4tui/implementation-plan.md`. The current document describes Phases 0-6 of c4tui's *original* implementation, which is finished. Either rename to `docs/historical-plan-phase-0-6.md` or add a Status: COMPLETE header plus a forward-looking "Phase 7" section that points at this roadmap.
 - **#16** — Add the SVG→PNG→Kitty→placement image-pipeline stage diagram in `c4tui/architecture.md`. The architect's review noted this absence is why ViewStore's three jobs were conflated; the diagram makes the Phase 6 split self-evident.
 - **#17** — Write a short cross-repo testing-patterns doc. After Phase 3 the `FakeTerminalBackend` is much smaller and the gap between it and tui-kit's `testkit` has narrowed; document the patterns side-by-side so they don't drift apart again.
@@ -745,6 +771,8 @@ The retention-tooling item could in principle go earlier, but it's most useful a
 
 - A CI script that fails if a tui-kit public type has zero in-tree references.
 - README, specification.md, architecture.md in both repos accurate and agreeing with each other and with the code.
+- tui-kit docs describe `elements` as composable buffer rendering plus explicit
+  render effects, not as a retained UI framework.
 - `c4tui/implementation-plan.md` clearly historical, not roadmap.
 - Image-pipeline stage diagram in `c4tui/architecture.md`.
 - A `docs/testing-patterns.md` (or similar) in one of the repos describing the testkit / FakeTerminalBackend pattern pair.
@@ -777,12 +805,13 @@ Phase 7 scope — five items from the architecture review:
   #14 — Reconcile README.md, specification.md, architecture.md in BOTH
         repos against the actual post-Phase-6 code. Specifically:
           - tui-kit/specification.md sections 4.x (public surfaces) should
-            list exactly what survived after Phases 1, 3, 6. If elements
-            was deleted in Phase 3, the entire section about elements goes.
-            If image_box was deleted (or image_viewport), the corresponding
-            section goes.
+            list exactly what survived after Phases 1, 3, 6. `elements`
+            should be documented as the render/effect composition layer,
+            not as a retained app runtime. If image_box was deleted (or
+            image_viewport), the corresponding section goes.
           - tui-kit/architecture.md should describe the unified trait,
-            single image widget, slimmed prelude.
+            single image widget, slimmed prelude, and local/future-remote
+            renderer boundary.
           - tui-kit/README.md should match.
           - c4tui/specification.md should describe LinkDirectory as
             implemented, not as sketched.
@@ -841,6 +870,81 @@ deletions happened).
 
 ---
 
+## Phase 8 — RenderEffect + renderer backend model
+
+### Scope
+
+tui-kit-only design and implementation phase for the structured render/effect
+model needed before any SSH client exists.
+
+### Items covered
+
+- Rename or split `TerminalEffect` into a renderer-neutral `RenderEffect`
+  concept if the code shape warrants it.
+- Keep local terminal application as an adapter: render effects apply to
+  `ImageSurfaceRegistry` today, but the effect values themselves should be
+  serializable in principle.
+- Define a minimal renderer backend boundary that can consume a buffer plus
+  render effects.
+- Add an in-process mock renderer that proves the boundary without network,
+  SSH, or subprocess complexity.
+- Shrink `elements` only where it directly supports that boundary. Containers
+  that transform child areas and forward effects stay; retained-runtime or
+  product-policy behavior should be removed or isolated.
+
+### Why this phase here
+
+The remote idea needs a clean local protocol before it needs SSH. This phase
+turns the current `elements` nucleus into a deliberate renderer contract while
+keeping the implementation testable in one process.
+
+### End state of phase
+
+- A small, documented render/effect contract in tui-kit.
+- Local terminal rendering still works through the existing terminal/image
+  stack.
+- A mock renderer can accept a rendered buffer and render effects and assert
+  the same placement/teardown behavior as the local adapter.
+- No SSH, persistent agent, host registry, or client profile format yet.
+
+---
+
+## Phase 9 — `tui-kit-cli` remote launcher prototype
+
+### Scope
+
+Prototype the user-facing client path after the render/effect model exists.
+
+### Items covered
+
+- Add a `tui-kit-cli` binary or workspace crate that can launch a remote app
+  through SSH with a PTY/stdin-stdout transport.
+- Define a small handshake so the remote app can detect the client renderer and
+  fall back to ordinary terminal mode when absent.
+- Forward typed input, mouse, and resize events from the local client to the
+  remote app.
+- Render remote buffer/effect frames locally using the Phase 8 renderer
+  backend.
+- Add a small profile/config format for hostnames and app commands only after
+  the basic `run ssh://host -- app` path works.
+
+### Why this phase here
+
+The client helper is a product surface and a security boundary. It should not
+exist until tui-kit has a stable enough local renderer contract to avoid
+streaming arbitrary terminal bytes or relying on local screen capture.
+
+### End state of phase
+
+- `tui-kit-cli run ssh://host -- app` can launch a compatible remote tui-kit
+  app and render it locally.
+- Plain `ssh -t host app` remains a fallback path for apps that choose normal
+  terminal mode.
+- The client exposes only allowlisted rendering/input capabilities. No
+  arbitrary local command execution and no implicit window/screen capture.
+
+---
+
 ## Appendix — Source review priority table
 
 For reference, here's the architect's prioritized list from the 2026-05-12 review. The numbers in this roadmap (#1 through #17) refer to these:
@@ -848,7 +952,7 @@ For reference, here's the architect's prioritized list from the 2026-05-12 revie
 | # | Refactor | Repo | Phase |
 |---|----------|------|-------|
 | 1 | Unify ViewPicker + ConnectionPicker + future LinkDirectory + multi-child-view picker into `NavPicker<T>` | c4tui | Phase 3 |
-| 2 | Resolve the `elements` module: port via NavPicker (validate) or delete | tui-kit | Phase 3 |
+| 2 | Preserve and later reshape `elements` as render/effect substrate | tui-kit | Phase 3, Phase 8 |
 | 3 | Collapse `Component` / `BufferComponent` / `Element` into one trait | tui-kit | Phase 1 |
 | 4 | Pick a winner between `ImageBox` and `ImageViewport`; delete the loser | tui-kit | Phase 3 |
 | 5 | Unify c4tui's three modal-slot lifecycles into one `ActiveModal` + one `render_modal` | c4tui | Phase 3 |
@@ -865,7 +969,8 @@ For reference, here's the architect's prioritized list from the 2026-05-12 revie
 | 16 | Add stage-1/2/3 image-pipeline diagram in c4tui architecture | c4tui | Phase 7 |
 | 17 | Write short cross-repo testing-patterns doc | both | Phase 7 |
 
-All 17 items are covered across the seven phases.
+All 17 review items are covered across the first seven phases. Phases 8-9 are
+new directional work, not part of the original review list.
 
 ---
 
@@ -873,5 +978,5 @@ All 17 items are covered across the seven phases.
 
 - **Inter-phase commits:** Each phase should end on green tests in both repos and a clean commit (or commit series). Do not start the next phase's architect prompt until the prior phase's plan is fully executed and committed.
 - **Plan vs roadmap:** This document is the roadmap. The per-phase plans the architect will produce are the actionable artifacts. Treat this document as durable; treat per-phase plans as one-shot.
-- **Order is significant.** Phase 1 unblocks Phase 3's trait usage. Phase 2 unblocks Phase 3's event types. Phase 3 unblocks Phases 4-6. Phase 5 is the goal. Don't reorder without re-running the dependency check.
+- **Order is significant.** Phase 1 unblocks Phase 3's trait usage. Phase 2 unblocks Phase 3's event types. Phase 3 unblocks Phases 4-6. Phase 5 is the c4tui goal. Phases 8-9 must not start until the render/effect contract is documented and the local app cleanup is complete. Don't reorder without re-running the dependency check.
 - **If a phase plan reveals the order is wrong:** stop, update this roadmap, then re-run the affected phase prompts. Don't silently improvise.
