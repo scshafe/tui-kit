@@ -39,27 +39,59 @@ an oversized distributed-runtime commitment.
 **Exit:** future workers can start from this plan without reading the whole
 conversation history.
 
+**Shipped in:** `7d47d59` (direction doc + fresh plan + supersede stamp),
+`2e33ae2` (architecture/specification/README alignment), `049e418` (historical
+phase plans and handoffs tracked).
+
 ## Phase B — RenderEffect Contract
 
 **Purpose:** Promote the effect contract as tui-kit's load-bearing idea.
 
-- [ ] Rename `TerminalEffect` to `RenderEffect` when the diff is controlled.
-- [ ] Keep an adapter method for applying effects to `ImageSurfaceRegistry`.
-- [ ] Ensure `RenderEffect` is data-only and serializable in principle.
-- [ ] Keep effect application separate from effect description.
+**Pre-conditions / state:** `TerminalEffect` lives only in `src/elements.rs`
+(~30 call sites in a 3,727-line file); no `c4tui` references exist; the rename
+is a single-crate refactor. The size of `src/elements.rs` is a real concern
+and motivates the extract-first sub-step below.
+
+- [ ] **Extract `RenderEffect` + `EffectElement` (and the trait method names)
+      into their own module** (e.g. `src/elements/effect.rs` or
+      `src/render_effect.rs`) **before** the rename, so the rename diff stays
+      scoped to one file and the type is easier to talk about.
+- [ ] Rename `TerminalEffect` to `RenderEffect` when the extraction is in and
+      the diff is controlled.
+- [ ] Keep an adapter method for applying effects to `ImageSurfaceRegistry`
+      (verify whether this already exists via the current `terminal_effects`
+      trait method, or whether net-new code is needed).
+- [ ] **Ensure `RenderEffect` is data-only**, defined concretely as:
+      enum derives `Clone + Debug + PartialEq`; contains no `Box<dyn _>`; no
+      `Fn`/closure fields; no `Arc<Mutex<_>>` handles to live state; no
+      ambient access to global terminal handles or app state. ("Serializable
+      in principle" is the *consequence*; these constraints are the test.)
+- [ ] Keep effect application separate from effect description: the enum
+      describes what should happen; the trait or backend decides how.
 - [ ] Add or preserve tests that assert image upload, placement, deletion, and
       teardown behavior through mock surfaces.
-- [ ] Document `RenderEffect + EffectElement` as the core innovation.
+- [ ] Document `RenderEffect + EffectElement` as the core innovation in
+      `architecture.md §8` (already retitled "Render Effects and Image
+      Lifecycle") and add a short module-level rustdoc on the new effect
+      module summarising the data-only contract.
 
 **Non-goals:** no frame transport, no wire schema, no client helper.
 
-**Exit:** tui-kit can describe render-host operations without saying "terminal"
-where it means "renderer."
+**Exit:** tui-kit can describe render-host operations without saying
+"terminal" where it means "renderer," and the data-only criteria above hold
+under `cargo check` and the relevant tests.
 
 ## Phase C — Elements Triage
 
 **Purpose:** Keep the useful composition layer and constrain the retained-widget
 surface.
+
+> **Ordering note:** Phase C deletions depend on Phase F outcomes. Only the
+> c4tui cleanup reveals which retained widgets have a real consumer. Treat
+> Phase C as a continuous trimming activity gated on Phase F's progress, not
+> as a discrete pre-F phase. The "demote / keep iff consumed" entries below
+> can be evaluated as soon as the relevant Phase F sub-task lands; do not
+> delete speculatively before c4tui converges.
 
 - [ ] Keep `Element` as the ergonomic alias/name for
       `BufferComponent<Event = KeyEvent>`.
@@ -154,3 +186,25 @@ plus ordinary SSH/container reliability.
 - Prefer deletion over compatibility shims while the crate is early.
 - Every new public surface needs a named consumer or a test proving a terminal,
   layout, render-effect, or lifecycle invariant.
+
+## Plan Complete When
+
+The plan as a whole is done when all of the following hold:
+
+- Phases A–F have all hit their stated Exit criteria.
+- `TerminalEffect` has been replaced by `RenderEffect` everywhere in tui-kit
+  (and in c4tui if/when it ever takes a direct dependency on the type), and
+  the type passes the data-only criteria in Phase B.
+- c4tui no longer carries placeholders for unresolved tui-kit boundaries
+  (`NavPicker` consolidation, unified modal handling, the single image-viewport
+  winner) and has shipped `LinkDirectory`.
+- `elements` is either small and load-bearing or has been decisively trimmed;
+  no speculative retained-widget machinery remains.
+- Operator has signed off on local + SSH + SSH-into-container + `docker exec`
+  smoke tests for the image path, with results recorded in the repo.
+- testkit can verify render output and render effects without a live terminal
+  emulator, and the docs say when to use it versus the c4tui fake backend.
+
+When these hold, tui-kit is library-author-ready. Further protocol or
+renderer-backend work then becomes pull-driven from the Deferred Pulls list,
+not committed roadmap.
