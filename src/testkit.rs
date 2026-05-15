@@ -10,6 +10,8 @@
 //! tests, but intentionally not re-exported from the production prelude. Test
 //! doubles must preserve production semantics before they grow convenience API.
 
+use crate::component::BufferComponent;
+use crate::elements::RenderEffect;
 use crate::events::AppEvent;
 use crate::image::{ImageCapabilities, ImageSurface, PlaceOptions};
 use crate::input::KeyEvent;
@@ -38,6 +40,77 @@ where
     let mut buffer = Buffer::empty(area);
     widget.render(area, &mut buffer, state);
     buffer
+}
+
+/// Render a [`BufferComponent`] into an owned [`Buffer`].
+///
+/// Collapses the `Buffer::empty(area) + render_buffer(area, &mut buffer)?`
+/// pattern that recurs across element and widget tests.
+pub fn render_to_buffer<C: BufferComponent>(component: &mut C, area: Rect) -> Result<Buffer> {
+    let mut buffer = Buffer::empty(area);
+    component.render_buffer(area, &mut buffer)?;
+    Ok(buffer)
+}
+
+/// Find the first [`RenderEffect::PlaceImage`] in `effects` whose placement id matches.
+///
+/// Replaces `effects.iter().any(|e| matches!(e, RenderEffect::PlaceImage { options, .. } if options.placement_id == N))`
+/// with a single call that also gives the caller the matching [`PlaceOptions`].
+pub fn find_place_with_placement_id(
+    effects: &[RenderEffect],
+    placement_id: u32,
+) -> Option<&PlaceOptions> {
+    effects.iter().find_map(|effect| match effect {
+        RenderEffect::PlaceImage { options, .. } if options.placement_id == placement_id => {
+            Some(options)
+        }
+        _ => None,
+    })
+}
+
+/// Assert that every placement introduced by `placed` is covered by a teardown in `teardown`.
+///
+/// A placement `(image_id, placement_id)` from a [`RenderEffect::PlaceImage`]
+/// in `placed` is "covered" if `teardown` contains any of:
+///
+/// - [`RenderEffect::DeleteImagePlacement`] matching both ids,
+/// - [`RenderEffect::DeletePlacement`] matching the placement id,
+/// - [`RenderEffect::DeleteAllPlacements`] (blanket),
+/// - [`RenderEffect::ForgetAllImages`] (blanket).
+///
+/// Blanket teardowns satisfy every placement at once; tests wanting stricter
+/// per-placement assertions should match on `teardown` directly or use
+/// [`find_place_with_placement_id`] alongside their own checks. Panics with a
+/// descriptive message naming the first uncovered placement.
+pub fn assert_teardown_covers(placed: &[RenderEffect], teardown: &[RenderEffect]) {
+    let blanket = teardown.iter().any(|effect| {
+        matches!(
+            effect,
+            RenderEffect::DeleteAllPlacements | RenderEffect::ForgetAllImages
+        )
+    });
+    if blanket {
+        return;
+    }
+    for effect in placed {
+        if let RenderEffect::PlaceImage { options, .. } = effect {
+            let covered = teardown.iter().any(|t| match t {
+                RenderEffect::DeleteImagePlacement {
+                    image_id,
+                    placement_id,
+                } => *image_id == options.image_id && *placement_id == options.placement_id,
+                RenderEffect::DeletePlacement { placement_id } => {
+                    *placement_id == options.placement_id
+                }
+                _ => false,
+            });
+            assert!(
+                covered,
+                "teardown does not cover PlaceImage with image_id={} placement_id={}: teardown={:?}",
+                options.image_id, options.placement_id, teardown,
+            );
+        }
+    }
 }
 
 /// A deterministic event script for driving app/widget event handlers in tests.
@@ -619,5 +692,82 @@ mod tests {
                 MockImageCall::ForgetAll,
             ]
         );
+    }
+
+    fn place_effect(image_id: u32, placement_id: u32) -> RenderEffect {
+        RenderEffect::PlaceImage {
+            origin: crate::layout::CellOffset { col: 0, row: 0 },
+            options: PlaceOptions {
+                image_id,
+                placement_id,
+                source: crate::layout::PixelRect {
+                    x: 0,
+                    y: 0,
+                    width: 4,
+                    height: 4,
+                },
+                cell_cols: 1,
+                cell_rows: 1,
+            },
+        }
+    }
+
+    #[test]
+    fn find_place_returns_first_match_by_placement_id() {
+        let effects = vec![
+            place_effect(1, 10),
+            place_effect(2, 20),
+            place_effect(3, 20),
+        ];
+
+        let found = find_place_with_placement_id(&effects, 20).expect("place not found");
+        assert_eq!(found.image_id, 2);
+        assert_eq!(found.placement_id, 20);
+
+        assert!(find_place_with_placement_id(&effects, 99).is_none());
+    }
+
+    #[test]
+    fn assert_teardown_covers_accepts_matched_delete_image_placement() {
+        let placed = vec![place_effect(7, 9)];
+        let teardown = vec![RenderEffect::DeleteImagePlacement {
+            image_id: 7,
+            placement_id: 9,
+        }];
+
+        assert_teardown_covers(&placed, &teardown);
+    }
+
+    #[test]
+    fn assert_teardown_covers_accepts_delete_placement_by_id() {
+        let placed = vec![place_effect(7, 9)];
+        let teardown = vec![RenderEffect::DeletePlacement { placement_id: 9 }];
+
+        assert_teardown_covers(&placed, &teardown);
+    }
+
+    #[test]
+    fn assert_teardown_covers_accepts_blanket_delete_all_placements() {
+        let placed = vec![place_effect(1, 10), place_effect(2, 20)];
+        let teardown = vec![RenderEffect::DeleteAllPlacements];
+
+        assert_teardown_covers(&placed, &teardown);
+    }
+
+    #[test]
+    fn assert_teardown_covers_accepts_blanket_forget_all_images() {
+        let placed = vec![place_effect(1, 10)];
+        let teardown = vec![RenderEffect::ForgetAllImages];
+
+        assert_teardown_covers(&placed, &teardown);
+    }
+
+    #[test]
+    #[should_panic(expected = "teardown does not cover PlaceImage")]
+    fn assert_teardown_covers_panics_when_placement_missing() {
+        let placed = vec![place_effect(7, 9)];
+        let teardown = vec![RenderEffect::DeletePlacement { placement_id: 8 }];
+
+        assert_teardown_covers(&placed, &teardown);
     }
 }

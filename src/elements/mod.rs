@@ -2559,6 +2559,7 @@ mod tests {
     use crate::image::PlaceOptions;
     use crate::keymap::{KeyTrigger, SpecialKey};
     use crate::layout::{PixelRect, PixelSize};
+    use crate::testkit::{assert_teardown_covers, find_place_with_placement_id, render_to_buffer};
     use crate::widgets::image_viewport::{ImageViewport, ViewportImage};
 
     #[derive(Debug, Clone, PartialEq, Eq)]
@@ -2887,10 +2888,7 @@ mod tests {
     #[test]
     fn text_wraps_and_truncates() -> Result<()> {
         let mut text = Text::with_id("body", "abcdef").truncate(true);
-        let area = Rect::new(0, 0, 4, 1);
-        let mut buffer = Buffer::empty(area);
-
-        text.render_buffer(area, &mut buffer)?;
+        let buffer = render_to_buffer(&mut text, Rect::new(0, 0, 4, 1))?;
 
         assert!(format!("{buffer:?}").contains("a..."));
         assert!(text.dirty().is_clean());
@@ -2981,13 +2979,25 @@ mod tests {
     }
 
     #[test]
+    fn stack_teardown_covers_every_rendered_placement() -> Result<()> {
+        let (first, _, _) = EffectProbeElement::new("first");
+        let (second, _, _) = EffectProbeElement::new("second");
+        let mut stack: Stack<TestCommand> = Stack::horizontal("stack")
+            .with_effect_child(first.with_placement_id(11), StackConstraint::Length(2))
+            .with_effect_child(second.with_placement_id(22), StackConstraint::Length(2));
+
+        let placed = stack.render_effects(Rect::new(0, 0, 4, 4))?;
+        let teardown = stack.teardown_effects()?;
+
+        assert_teardown_covers(&placed, &teardown);
+        Ok(())
+    }
+
+    #[test]
     fn scroll_y_offsets_buffer_output_and_marks_child_dirty() -> Result<()> {
         let mut element = Text::with_id("body", "one\ntwo\nthree").scroll_y();
         element.scroll_to(1);
-        let area = Rect::new(0, 0, 8, 2);
-        let mut buffer = Buffer::empty(area);
-
-        element.render_buffer(area, &mut buffer)?;
+        let buffer = render_to_buffer(&mut element, Rect::new(0, 0, 8, 2))?;
 
         let rendered = format!("{buffer:?}");
         assert!(rendered.contains("two"));
@@ -3099,10 +3109,9 @@ mod tests {
         let (child, areas, _dirty_events) = AreaProbeElement::new("child", "child");
         let mut element = child.with_border(ElementBorder::new().title("Title"));
         let area = Rect::new(0, 0, 12, 3);
-        let mut buffer = Buffer::empty(area);
 
         assert_eq!(element.child_area(area), Rect::new(1, 1, 10, 1));
-        element.render_buffer(area, &mut buffer)?;
+        let buffer = render_to_buffer(&mut element, area)?;
 
         let rendered = format!("{buffer:?}");
         assert!(rendered.contains("Title"));
@@ -3114,10 +3123,7 @@ mod tests {
     fn nested_padding_and_border_apply_in_wrapper_order() -> Result<()> {
         let (child, areas, _dirty_events) = AreaProbeElement::new("child", "child");
         let mut element = child.with_padding(1).with_border(());
-        let area = Rect::new(0, 0, 10, 5);
-        let mut buffer = Buffer::empty(area);
-
-        element.render_buffer(area, &mut buffer)?;
+        let _ = render_to_buffer(&mut element, Rect::new(0, 0, 10, 5))?;
 
         assert_eq!(areas.borrow().as_slice(), &[Rect::new(2, 2, 6, 1)]);
         Ok(())
@@ -3412,9 +3418,7 @@ mod tests {
         let mut window = Window::new("window", image);
 
         let effects = window.render_effects(Rect::new(0, 0, 4, 2))?;
-        assert!(effects
-            .iter()
-            .any(|effect| matches!(effect, RenderEffect::PlaceImage { options, .. } if options.placement_id == 9)));
+        assert!(find_place_with_placement_id(&effects, 9).is_some());
         assert!(window.registered_effect_placements().contains(&(7, 9)));
 
         let teardown = window.teardown_effects()?;
