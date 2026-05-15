@@ -649,4 +649,158 @@ mod tests {
             "\x1b_Ga=p,i=7,p=9,q=2,x=11,y=13,w=17,h=19,c=23,r=29;\x1b\\"
         );
     }
+
+    fn lifecycle_opts(
+        image_id: u32,
+        placement_id: u32,
+        cell_cols: u16,
+        cell_rows: u16,
+    ) -> PlaceOptions {
+        PlaceOptions {
+            image_id,
+            placement_id,
+            source: PixelRect {
+                x: 0,
+                y: 0,
+                width: 16,
+                height: 9,
+            },
+            cell_cols,
+            cell_rows,
+        }
+    }
+
+    #[test]
+    fn mock_records_load_then_place_sequence() {
+        use crate::testkit::{MockImageCall, MockImageSurface};
+
+        let mut surface = MockImageSurface::default();
+        let opts = lifecycle_opts(1, 10, 8, 4);
+
+        surface.ensure_loaded(1, b"png-bytes").unwrap();
+        surface.place(opts).unwrap();
+
+        assert_eq!(
+            surface.calls(),
+            &[
+                MockImageCall::EnsureLoaded {
+                    image_id: 1,
+                    bytes: 9,
+                },
+                MockImageCall::Place(opts),
+            ]
+        );
+    }
+
+    #[test]
+    fn mock_records_place_then_resize_with_stable_placement_id() {
+        use crate::testkit::{MockImageCall, MockImageSurface};
+
+        let mut surface = MockImageSurface::default();
+        let small = lifecycle_opts(1, 10, 4, 2);
+        let large = lifecycle_opts(1, 10, 8, 4);
+
+        surface.place(small).unwrap();
+        surface.place(large).unwrap();
+
+        assert_eq!(
+            surface.calls(),
+            &[MockImageCall::Place(small), MockImageCall::Place(large)]
+        );
+    }
+
+    #[test]
+    fn mock_records_teardown_then_place_round_trip() {
+        use crate::testkit::{MockImageCall, MockImageSurface};
+
+        let mut surface = MockImageSurface::default();
+        let opts = lifecycle_opts(1, 10, 4, 2);
+
+        surface.place(opts).unwrap();
+        surface.delete_image_placement(1, 10).unwrap();
+        surface.place(opts).unwrap();
+
+        assert_eq!(
+            surface.calls(),
+            &[
+                MockImageCall::Place(opts),
+                MockImageCall::DeleteImagePlacement {
+                    image_id: 1,
+                    placement_id: 10,
+                },
+                MockImageCall::Place(opts),
+            ]
+        );
+    }
+
+    #[test]
+    fn mock_records_repeated_place_with_identical_options() {
+        use crate::testkit::{MockImageCall, MockImageSurface};
+
+        let mut surface = MockImageSurface::default();
+        let opts = lifecycle_opts(1, 10, 4, 2);
+
+        surface.place(opts).unwrap();
+        surface.place(opts).unwrap();
+        surface.place(opts).unwrap();
+
+        assert_eq!(
+            surface.calls(),
+            &[
+                MockImageCall::Place(opts),
+                MockImageCall::Place(opts),
+                MockImageCall::Place(opts),
+            ]
+        );
+    }
+
+    #[test]
+    fn mock_records_forget_all_cycle_requiring_reload() {
+        use crate::testkit::{MockImageCall, MockImageSurface};
+
+        let mut surface = MockImageSurface::default();
+        let opts = lifecycle_opts(1, 10, 4, 2);
+
+        surface.ensure_loaded(1, b"png").unwrap();
+        surface.place(opts).unwrap();
+        surface.forget_all().unwrap();
+        surface.ensure_loaded(1, b"png").unwrap();
+        surface.place(opts).unwrap();
+
+        assert_eq!(
+            surface.calls(),
+            &[
+                MockImageCall::EnsureLoaded {
+                    image_id: 1,
+                    bytes: 3,
+                },
+                MockImageCall::Place(opts),
+                MockImageCall::ForgetAll,
+                MockImageCall::EnsureLoaded {
+                    image_id: 1,
+                    bytes: 3,
+                },
+                MockImageCall::Place(opts),
+            ]
+        );
+    }
+
+    #[test]
+    fn disabled_registry_full_lifecycle_does_not_panic() {
+        let mut registry =
+            ImageSurfaceRegistry::from_preference(ImageBackendPreference::Disabled).unwrap();
+        let opts = lifecycle_opts(1, 10, 4, 2);
+
+        registry.ensure_loaded(1, b"png").unwrap();
+        registry.place(opts).unwrap();
+        registry.delete_image_placement(1, 10).unwrap();
+        registry.place(opts).unwrap();
+        registry.delete_placement(10).unwrap();
+        registry.delete_all_placements().unwrap();
+        registry.forget_all().unwrap();
+        registry.flush().unwrap();
+
+        assert_eq!(registry.preference(), &ImageBackendPreference::Disabled);
+        assert_eq!(registry.capabilities().protocol, ImageProtocol::Noop);
+    }
 }
