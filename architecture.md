@@ -130,6 +130,54 @@ the rendering model. Future backends may apply the same buffers and render
 effects from a client process, for example when an app runs on a remote host
 and a local helper owns the real terminal.
 
+### 7.1 Terminal-protocol requirements
+
+For the existing Kitty image path to work end-to-end, the terminal stack must
+satisfy a small, concrete set of requirements. These are protocol-level
+requirements, not env-var requirements — tui-kit reads no env vars.
+
+**Kitty graphics protocol.** The terminal must accept the Application Program
+Command escapes that tui-kit writes for image upload, placement, and deletion.
+The escape vocabulary is in `src/image.rs`:
+
+- `transmit_png` (lines ~476-498) chunks PNG bytes into `\x1b_Ga=t,f=100,i=<id>,m=<more>;<base64>\x1b\\` APC payloads.
+- `kitty_place_escape` (lines ~505-518) emits `\x1b_Ga=p,i=<id>,p=<pid>,q=2,x=,y=,w=,h=,c=,r=;\x1b\\`.
+- `kitty_delete_placement_escape` (lines ~501-503) emits `\x1b_Ga=d,d=i,i=<id>,p=<pid>,q=2;\x1b\\`.
+- `KittyImageRegistry::forget_all` (lines ~451-458) emits `\x1b_Ga=d,d=I,i=<id>,q=2;\x1b\\` per loaded image.
+- `KittyImageRegistry::shutdown` (lines ~391-393) emits the global `\x1b_Ga=d,d=A,q=2;\x1b\\` cleanup.
+
+Terminals that drop these escapes silently, or that translate them to literal
+output, will exhibit no images but no error either — the failure mode is
+visual, not crashy.
+
+**Alt-screen + raw-mode lifecycle.** `Terminal::enter_with_config`
+(`src/terminal.rs:115`) enables raw mode, enters the alternate screen, hides
+the cursor, and enables mouse capture before any image escape is written.
+`Drop` restores all of these in reverse order and calls
+`ImageSurfaceRegistry::shutdown` to free image data. Tests must not enter a
+real alternate screen; the testkit's `MockImageSurface` and
+`render_to_buffer` exercise the data flow without touching the terminal.
+
+**Cursor positioning for `place_at`.** Kitty places images at the current
+cursor position. `position_cursor` (`src/image.rs:466-474`) issues `\x1b[r;cH`
+before each `place` call routed through `ImageSurfaceRegistry::place_at`.
+Terminals or PTY layers that filter cursor-position escapes will mis-place
+images.
+
+**TTY detection.** The only runtime check tui-kit does is `IsTerminal` on
+stdin/stdout (`src/tty.rs:14-20`). There is no terminfo probing, no `TERM`
+sniffing, no `COLORTERM` check. Backend selection is configuration-driven
+via `TerminalConfig::image_backend` (`src/terminal.rs:45-48`) and its preset
+constructors.
+
+**Window size.** `terminal_metrics` (`src/tty.rs:28-42`) calls `TIOCGWINSZ`
+to get both cell and pixel dimensions. If the PTY layer does not propagate
+pixel dimensions, the metrics fall back to `CellPixel::FALLBACK` and image
+sizing degrades gracefully.
+
+Operator-side verification of these requirements against real terminals is
+documented in `docs/superpowers/handoffs/2026-05-15-image-smoke-checklist.md`.
+
 ## 8. Render Effects and Image Lifecycle
 
 The image layer is centered on stable image IDs and placement IDs. Callers can:
@@ -169,6 +217,13 @@ The testkit (`src/testkit.rs`) mirrors the public boundaries:
   `assert_teardown_covers` (the latter encodes the "everything placed is
   torn down" invariant declaratively);
 - run deterministic scheduler flows via `DeterministicScheduler`.
+
+The data-flow lifecycle scenarios for the image path are locked by tests in
+`src/image.rs` (alongside the `NoopImageSurface` lifecycle test): load-then-
+place, place-then-resize-area, teardown-then-place, repeated place with
+stable placement id, `forget_all` cycle requiring reload, and a full
+lifecycle through `ImageBackendPreference::Disabled` that exercises the
+degraded path without panic.
 
 Tests should verify terminal-facing behavior at the boundary rather than by
 entering a real alternate screen.
