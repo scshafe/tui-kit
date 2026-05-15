@@ -159,16 +159,44 @@ not tied to any particular file format.
 
 ## 10. Testing Architecture
 
-The testkit mirrors the public boundaries:
+The testkit (`src/testkit.rs`) mirrors the public boundaries:
 
-- render widgets into buffers and assert cells;
-- script typed events;
-- use mock image surfaces to assert image placement and teardown;
-- assert render-effect forwarding through area-transforming containers;
-- run deterministic scheduler flows.
+- render `ratatui::Widget` and `BufferComponent` implementations into buffers
+  via `render_widget`, `render_stateful_widget`, and `render_to_buffer`;
+- script typed `AppEvent` streams via `EventScript`;
+- assert image-lifecycle calls via `MockImageSurface` + `MockImageCall`;
+- assert render-effect shape via `find_place_with_placement_id` and
+  `assert_teardown_covers` (the latter encodes the "everything placed is
+  torn down" invariant declaratively);
+- run deterministic scheduler flows via `DeterministicScheduler`.
 
 Tests should verify terminal-facing behavior at the boundary rather than by
 entering a real alternate screen.
+
+### `tui-kit::testkit` vs `c4tui::backend::FakeTerminalBackend`
+
+Two test seams exist; they have different jobs and should not be confused.
+
+- **`tui-kit::testkit` asserts library-level invariants.** It tests the
+  buffer/effect boundary, render-effect sequences, image-lifecycle calls, pure
+  buffer rendering, and scheduler determinism — everything reachable through
+  the library's public traits (`BufferComponent`, `EffectElement`,
+  `ImageSurface`, `Scheduler`). It does not enter or fake a terminal: a
+  `MockImageSurface` records calls, a `DeterministicScheduler` runs work on
+  demand, and `render_to_buffer` produces an owned buffer without any
+  alternate-screen lifecycle.
+
+- **`c4tui::backend::FakeTerminalBackend` asserts app-level wiring.** It
+  tests the full `TerminalBackend` trait: enter/leave alternate screen, the
+  render pipeline plumbing, modal scope routing, and anything that requires
+  the terminal lifecycle. It is c4tui's responsibility because that lifecycle
+  is what an app — not a library — owns.
+
+Rule of thumb: assert library invariants in tui-kit `tests/` or `src/.../tests`
+modules with `testkit`. Assert app wiring in c4tui tests with
+`FakeTerminalBackend`. If a tui-kit test is reaching for a terminal lifecycle,
+the test belongs on the c4tui side or the production code under test is
+crossing a boundary it shouldn't.
 
 ## 11. Extension Rules
 
