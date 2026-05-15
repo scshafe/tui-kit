@@ -79,6 +79,13 @@ impl EventScript<Infallible> {
 }
 
 /// A single image lifecycle call captured by [`MockImageSurface`].
+///
+/// `ImageSurface::flush` is intentionally not represented here: the trait
+/// method takes `&self`, which rules out pushing to the mock's recording
+/// vector without interior mutability that would break the derived
+/// `Clone + PartialEq + Eq`. Flush is output-buffer flushing, not a
+/// lifecycle state change worth asserting on a mock that already records
+/// every lifecycle-affecting call.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum MockImageCall {
@@ -88,7 +95,6 @@ pub enum MockImageCall {
     DeletePlacement { placement_id: u32 },
     DeleteAllPlacements,
     ForgetAll,
-    Flush,
 }
 
 /// Image surface test double that records lifecycle calls and emits no escapes.
