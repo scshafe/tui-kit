@@ -30,7 +30,6 @@ Early. The crate is a domain-neutral substrate for terminal applications that ne
 | `watcher` | notify-based file watcher with debounce, emits `WatcherEvent::WorkspaceChanged` |
 | `widgets::dialog` | `Dialog` widget for bordered modal text rendering |
 | `widgets::grid` | Selectable/grid collection renderer with local cell canvases, active/selected styling, keyboard navigation, and scroll indicators |
-| `widgets::image_box` | `ImageBox`, `ImageBoxState`, and `ImageBoxPlan` - common image viewport: source dimensions, zoom, crop, optional border/title |
 | `terminal` | `Terminal` wrapping `ratatui::Terminal<CrosstermBackend>` + image registry + raw-mode lifecycle |
 | `testkit` | Widget buffer rendering helpers, typed event scripts, mock image surface, `DeterministicScheduler` |
 
@@ -99,41 +98,13 @@ This effect path is intentionally separate from direct terminal writes. Today
 effects apply to the local `ImageSurfaceRegistry`; later they can become the
 wire intent consumed by a local renderer for a remote app.
 
-## ImageBox
-
-`ImageBox` is the streamlined image viewport. It keeps source image dimensions, applies zoom to derive theoretical dimensions, then crops the theoretical image to the available box pixels. If the theoretical image is smaller than the box on either axis, it is centered on that axis.
-
-It does not replace the lower-level primitives. Consumers that need direct control can still use the `layout` and `image` modules directly.
-
-```rust
-use tui_kit::prelude::*;
-
-let image = ImageBox::new(image_id, MAIN_PLACEMENT_ID, PixelSize::new(width, height))
-    .border(true)
-    .title("Diagram");
-let mut state = ImageBoxState::default();
-
-let plan = image.plan(area, terminal.metrics(), &state)?;
-terminal.draw(|frame| {
-    plan.render(frame.buffer_mut());
-})?;
-plan.place(terminal.images())?;
-terminal.images().flush()?;
-```
-
-Manual visual test:
-
-```bash
-cd visual-tests
-cargo run --offline
-```
-
 ## Removed pending consumer demand
 
 These public surfaces were pruned after they showed no durable consumer demand. Reintroduce any of them only with a named consumer in the same change set.
 
 - `widgets::picker`: no real consumer validated the generic picker API.
 - `widgets::dialog` modal state/config/actions: the presentational `Dialog` widget is the reusable part.
+- `widgets::image_box`: `image_viewport` is the consumer-validated image-aperture widget; `image_box` had zero downstream consumers.
 - `bar::Segment<Ctx>` / `SegmentBar<Ctx>` registry: app-owned segment traits fit borrowed status contexts better.
 - Generic focus traversal: modal and capturing scopes are the validated reusable
   pieces today.

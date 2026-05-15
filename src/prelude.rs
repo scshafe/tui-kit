@@ -7,9 +7,9 @@
 //! Scope: constructors and traits an app reaches for at the import line, plus
 //! the small set of return/state types those constructors hand back. Internal
 //! state, configuration, placement, and error types live behind their module
-//! paths (`tui_kit::widgets::image_box::*`, `tui_kit::layout::*`,
-//! `tui_kit::widgets::image_viewport::*`) so glob-importing the prelude does
-//! not pollute consumer namespaces with policy enums and error structs.
+//! paths (`tui_kit::layout::*`, `tui_kit::widgets::image_viewport::*`) so
+//! glob-importing the prelude does not pollute consumer namespaces with
+//! policy enums and error structs.
 //!
 //! Test harness helpers stay under [`crate::testkit`].
 
@@ -46,7 +46,6 @@ pub use crate::widgets::dialog::Dialog;
 pub use crate::widgets::grid::{
     Grid, GridCell, GridCellPlacement, GridColumnMode, GridNavigation, GridStyle,
 };
-pub use crate::widgets::image_box::{ImageBox, ImageBoxPlan, ImageBoxState};
 pub use crate::widgets::image_viewport::{
     ImageScale, ImageViewport, ImageViewportOptions, ImageViewportWidget,
 };

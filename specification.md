@@ -106,7 +106,7 @@ The `widgets` module contains reusable widgets:
 - `dialog` for simple bordered text overlays.
 - `grid` for selectable collections with active/selected styling, keyboard
   movement, and scroll indicators.
-- `image_box` and `image_viewport` for image placement, zoom, and crop planning.
+- `image_viewport` for image placement, zoom, and crop planning.
 
 Widgets should expose behavior through typed state and outcomes rather than
 owning application commands.
