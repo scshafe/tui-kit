@@ -6,6 +6,7 @@
 //! - Declarative [`elements`] for first-class UI objects, windows, and effects.
 //! - Cell + pixel [`tty`] metrics.
 //! - Image lifecycle surfaces in [`image`].
+//! - Buffer/effect renderer backend contract in [`renderer`].
 //! - Generic placement / fit / pan / zoom math in [`layout`].
 //! - Slot-aligned, priority-truncated text bars in [`bar`].
 //! - Priority-queue [`scheduler`] for async work.
@@ -41,6 +42,7 @@ pub mod input_thread;
 pub mod keymap;
 pub mod layout;
 pub mod prelude;
+pub mod renderer;
 pub mod scheduler;
 pub mod terminal;
 pub mod testkit;

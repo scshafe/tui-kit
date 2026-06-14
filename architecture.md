@@ -39,6 +39,7 @@ an application selected a row or what a selected image represents.
 | `elements` | Composable buffer-rendered elements and explicit render-effect layers |
 | `layout` | Cell/pixel metrics, placements, transforms, crops, viewport math |
 | `image` | Kitty image registry and image-surface abstraction |
+| `renderer` | Buffer/effect frame contract and renderer backend trait |
 | `terminal` | Crossterm/ratatui terminal lifecycle plus image flushing |
 | `widgets` | Dialog, grid, and image viewport widgets |
 | `bar` | Priority-aware status-line layout |
@@ -62,9 +63,10 @@ Terminal-facing rendering is explicitly planned and applied:
    canvas metrics, zoom, and crop state.
 3. Effect-capable elements expose image upload, placement, and teardown as
    explicit effect values.
-4. A renderer backend applies those effects to an `ImageSurface` or another
-   compatible surface.
-5. Teardown is applied explicitly when an image leaves the screen or a mode
+4. `renderer::RenderFrame` packages the buffer and render effects together.
+5. A `RendererBackend` applies the frame locally through `Terminal`, to an
+   `ImageSurfaceRenderer`, or to another compatible backend.
+6. Teardown is applied explicitly when an image leaves the screen or a mode
    closes.
 
 This split keeps tests deterministic and prevents hidden terminal side effects
@@ -126,9 +128,11 @@ Apps can bypass the high-level terminal wrapper and consume lower-level modules
 directly if they need a custom backend.
 
 The terminal wrapper is the concrete local backend, not the conceptual limit of
-the rendering model. Future backends may apply the same buffers and render
-effects from a client process, for example when an app runs on a remote host
-and a local helper owns the real terminal.
+the rendering model. It implements `RendererBackend` by merging a
+`RenderFrame` buffer into the ratatui frame, applying effects to
+`ImageSurfaceRegistry`, and flushing images. Future backends may apply the same
+buffers and render effects from a client process, for example when an app runs
+on a remote host and a local helper owns the real terminal.
 
 ### 7.1 Terminal-protocol requirements
 
@@ -213,6 +217,7 @@ The testkit (`src/testkit.rs`) mirrors the public boundaries:
   via `render_widget`, `render_stateful_widget`, and `render_to_buffer`;
 - script typed `AppEvent` streams via `EventScript`;
 - assert image-lifecycle calls via `MockImageSurface` + `MockImageCall`;
+- assert backend frame consumption via `MockRendererBackend`;
 - assert render-effect shape via `find_place_with_placement_id` and
   `assert_teardown_covers` (the latter encodes the "everything placed is
   torn down" invariant declaratively);
@@ -233,11 +238,12 @@ entering a real alternate screen.
 Two test seams exist; they have different jobs and should not be confused.
 
 - **`tui-kit::testkit` asserts library-level invariants.** It tests the
-  buffer/effect boundary, render-effect sequences, image-lifecycle calls, pure
-  buffer rendering, and scheduler determinism — everything reachable through
-  the library's public traits (`BufferComponent`, `EffectElement`,
-  `ImageSurface`, `Scheduler`). It does not enter or fake a terminal: a
-  `MockImageSurface` records calls, a `DeterministicScheduler` runs work on
+  buffer/effect boundary, render-effect sequences, renderer-frame consumption,
+  image-lifecycle calls, pure buffer rendering, and scheduler determinism —
+  everything reachable through the library's public traits (`BufferComponent`,
+  `EffectElement`, `RendererBackend`, `ImageSurface`, `Scheduler`). It does
+  not enter or fake a terminal: a `MockImageSurface` records image calls,
+  `MockRendererBackend` records frames, a `DeterministicScheduler` runs work on
   demand, and `render_to_buffer` produces an owned buffer without any
   alternate-screen lifecycle.
 

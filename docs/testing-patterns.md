@@ -11,6 +11,7 @@ public library boundaries:
 - render a `ratatui::Widget` or `BufferComponent` into an owned buffer;
 - script typed `AppEvent` values;
 - assert image lifecycle calls through `MockImageSurface`;
+- assert renderer backend consumption through `MockRendererBackend`;
 - assert `RenderEffect` sequences;
 - drive scheduler work deterministically.
 
@@ -40,8 +41,8 @@ fn assert_ignored<M>(outcome: ComponentOutcome<M>) {
 ```
 
 Reach for this seam when a test is about buffer output, image-effect shape,
-typed geometry, scheduler ordering, or a toolkit trait contract. Do not enter a
-real terminal or assert c4tui app state here.
+renderer-frame consumption, typed geometry, scheduler ordering, or a toolkit
+trait contract. Do not enter a real terminal or assert c4tui app state here.
 
 ## c4tui `FakeTerminalBackend`
 
@@ -77,6 +78,6 @@ trait. Do not use it to test generic buffer math that belongs in tui-kit.
 ## Boundary Rule
 
 If a test can be written against `BufferComponent`, `EffectElement`,
-`ImageSurface`, or `Scheduler`, keep it in tui-kit. If it needs
+`RendererBackend`, `ImageSurface`, or `Scheduler`, keep it in tui-kit. If it needs
 `App`, `AppState`, `TerminalBackend`, `ViewCatalog`, `RenderCache`, or
 `ViewportState`, keep it in c4tui.

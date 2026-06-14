@@ -4,7 +4,7 @@ Opinionated middleware for building terminal UI applications. Sits on top of [`r
 
 ## Status
 
-Early. The crate is a domain-neutral substrate for terminal applications that need typed input, focus scopes, buffer-rendered components, explicit render effects, image placement, layout math, scheduling, and test utilities without adopting a full application framework. Local terminal sessions are the implemented target today; the buffer/effect split is intended to keep future remote renderers possible.
+Early. The crate is a domain-neutral substrate for terminal applications that need typed input, focus scopes, buffer-rendered components, explicit render effects, image placement, layout math, scheduling, and test utilities without adopting a full application framework. Local terminal sessions are the implemented target today; `renderer::RenderFrame` and `RendererBackend` make the buffer/effect split explicit enough to keep future remote renderers possible.
 
 ## Documents
 
@@ -26,13 +26,14 @@ Early. The crate is a domain-neutral substrate for terminal applications that ne
 | `tty` | `terminal_metrics()` reading both cell and pixel dimensions via TIOCGWINSZ |
 | `image` | `KittyImageRegistry` + `ImageSurface` trait - transmit-once-place-many image lifecycle |
 | `layout` | `PixelSize`, `CellSize`, `CanvasMetrics`, `ViewTransform`, `Placement`, `TailViewport` - fit/zoom/pan math plus tail-scroll viewport math |
+| `renderer` | `RenderFrame`, `RendererBackend`, and `ImageSurfaceRenderer` for buffer/effect backend tests and adapters |
 | `bar` | `StatusFragment`, `SegmentSlot`, `layout_status_line` priority truncation |
 | `scheduler` | Priority-queue task scheduler with custom-priority generic, scoped cancellation, machine-readable queue/timing stats |
 | `watcher` | notify-based file watcher with debounce, emits `WatcherEvent::WorkspaceChanged` |
 | `widgets::dialog` | `Dialog` widget for bordered modal text rendering |
 | `widgets::grid` | Selectable/grid collection renderer with local cell canvases, active/selected styling, keyboard navigation, and scroll indicators |
 | `terminal` | `Terminal` wrapping `ratatui::Terminal<CrosstermBackend>` + image registry + raw-mode lifecycle |
-| `testkit` | Widget buffer rendering helpers, typed event scripts, mock image surface, `DeterministicScheduler` |
+| `testkit` | Widget buffer rendering helpers, typed event scripts, mock image/render surfaces, `DeterministicScheduler` |
 
 ## Element composition
 
@@ -96,8 +97,9 @@ for effect in media.teardown_effects()? {
 clipping and source-cropping semantics before they can be forwarded safely.
 
 This effect path is intentionally separate from direct terminal writes. Today
-effects apply to the local `ImageSurfaceRegistry`; later they can become the
-wire intent consumed by a local renderer for a remote app.
+effects apply to the local `ImageSurfaceRegistry` through `Terminal` or an
+`ImageSurfaceRenderer`; later they can become the wire intent consumed by a
+local renderer for a remote app.
 
 ## Removed pending consumer demand
 
@@ -113,7 +115,7 @@ These public surfaces were pruned after they showed no durable consumer demand. 
 ## Out of scope (today)
 
 - Image surfaces other than Kitty graphics (Sixel, iTerm2)
-- Remote renderer protocol, SSH launcher, and client-side helper binaries
+- Remote renderer transport/protocol, SSH launcher, and client-side helper binaries
 - Async runtimes (tokio/async-std) - uses sync threads + channels
 - Full component tree runtime orchestration
 - Generic focus traversal, theming, additional widgets (list/table/tree/tabs), runtime config bundles, subscription primitives, periodic tick producers - all deliberately removed pending consumer demand

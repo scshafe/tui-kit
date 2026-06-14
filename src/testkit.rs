@@ -16,6 +16,7 @@ use crate::events::AppEvent;
 use crate::image::{ImageCapabilities, ImageSurface, PlaceOptions};
 use crate::input::KeyEvent;
 use crate::layout::PixelSize;
+use crate::renderer::{RenderFrame, RendererBackend};
 use crate::scheduler::{CancellationReport, Completion, Priority, RequestScope};
 use anyhow::Result;
 use anyhow::Result as AnyhowResult;
@@ -251,6 +252,43 @@ impl ImageSurface for MockImageSurface {
     }
 
     fn flush(&self) -> Result<()> {
+        Ok(())
+    }
+}
+
+/// Renderer backend test double that records complete buffer/effect frames.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct MockRendererBackend {
+    frames: Vec<RenderFrame>,
+    effects: Vec<RenderEffect>,
+}
+
+impl MockRendererBackend {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn frames(&self) -> &[RenderFrame] {
+        &self.frames
+    }
+
+    pub fn effects(&self) -> &[RenderEffect] {
+        &self.effects
+    }
+
+    pub fn take_frames(&mut self) -> Vec<RenderFrame> {
+        std::mem::take(&mut self.frames)
+    }
+
+    pub fn take_effects(&mut self) -> Vec<RenderEffect> {
+        std::mem::take(&mut self.effects)
+    }
+}
+
+impl RendererBackend for MockRendererBackend {
+    fn render_frame(&mut self, frame: &RenderFrame) -> Result<()> {
+        self.frames.push(frame.clone());
+        self.effects.extend(frame.effects().iter().cloned());
         Ok(())
     }
 }

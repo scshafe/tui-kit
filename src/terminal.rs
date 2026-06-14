@@ -25,6 +25,7 @@
 use crate::config::{ConfigError, Validate};
 use crate::image::{ImageBackendPreference, ImageSurface, ImageSurfaceRegistry};
 use crate::layout::{CanvasMetrics, CellArea, CellOffset};
+use crate::renderer::{RenderFrame, RendererBackend};
 use crate::tty::terminal_metrics;
 use crate::widgets::image_viewport::{
     ImageViewportOptions, ImageViewportPlacement, ImageViewportWidget, ViewportImage,
@@ -144,6 +145,22 @@ impl Terminal {
         Ok(())
     }
 
+    /// Render a buffer/effect frame through the local terminal backend.
+    ///
+    /// The ratatui buffer is merged into the current frame first; effects are
+    /// then applied to the terminal's image registry so image origins are
+    /// preserved for Kitty placement.
+    pub fn render_frame(&mut self, frame: &RenderFrame) -> Result<()> {
+        self.draw(|terminal_frame| {
+            terminal_frame.buffer_mut().merge(frame.buffer());
+        })?;
+        for effect in frame.effects() {
+            effect.apply_to_registry(self.images())?;
+        }
+        self.images().flush()?;
+        Ok(())
+    }
+
     pub fn images(&mut self) -> &mut ImageSurfaceRegistry {
         &mut self.images
     }
@@ -222,6 +239,12 @@ impl Terminal {
     /// cached.
     pub fn teardown_all_image_viewports(&mut self) -> Result<()> {
         self.images.delete_all_placements()
+    }
+}
+
+impl RendererBackend for Terminal {
+    fn render_frame(&mut self, frame: &RenderFrame) -> Result<()> {
+        Terminal::render_frame(self, frame)
     }
 }
 

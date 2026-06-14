@@ -85,14 +85,20 @@ placements, view transforms, source crops, and tail-scroll viewport math.
 Callers use these primitives to translate between terminal cells, terminal
 pixels, source images, and application coordinate systems.
 
-### 4.6 Images and Terminal
+### 4.6 Images, Renderer, and Terminal
 
 The `image` module defines the Kitty image registry and the `ImageSurface`
 boundary. The registry supports transmit-once, place-many image workflows and
 explicit teardown.
 
+The `renderer` module defines `RenderFrame`, a ratatui buffer plus explicit
+render effects, and `RendererBackend`, the backend trait that consumes those
+frames. `ImageSurfaceRenderer` is an in-process adapter for applying effects to
+an image surface while retaining the buffer for assertions.
+
 The `terminal` module wraps ratatui/crossterm terminal lifecycle setup,
-alternate-screen/raw-mode cleanup, image flushing, and terminal metrics.
+alternate-screen/raw-mode cleanup, image flushing, terminal metrics, and local
+`RendererBackend` application.
 
 Future renderer backends may consume the same buffers and render effects through
 a structured transport instead of writing terminal escape sequences directly.
@@ -125,7 +131,7 @@ and truncation policy. It does not own app-specific segment registries.
 ### 4.10 Testkit
 
 The `testkit` module provides buffer rendering helpers, event scripts, mock
-image surfaces, and deterministic scheduler tools for tests.
+image and renderer backends, and deterministic scheduler tools for tests.
 
 ## 5. Behavioral Contracts
 
@@ -147,7 +153,8 @@ tui-kit targets terminal applications using ratatui 0.29 and crossterm 0.28.
 The crate is early and may still revise APIs, but changes should preserve the
 core split between domain-neutral primitives and caller-owned application
 behavior. Local terminal rendering is the implemented compatibility target
-today; remote-render clients remain future work.
+today through `Terminal`'s `RendererBackend` implementation; remote-render
+clients remain future work.
 
 ## 7. Out of Scope for This Specification
 
