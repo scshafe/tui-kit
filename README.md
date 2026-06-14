@@ -10,6 +10,7 @@ Early. The crate is a domain-neutral substrate for terminal applications that ne
 
 - [specification.md](./specification.md) - public behavior, goals, and non-goals.
 - [architecture.md](./architecture.md) - module structure, data flow, and extension rules.
+- [docs/testing-patterns.md](./docs/testing-patterns.md) - test seams shared with c4tui.
 
 ## What's in the box
 

@@ -10,7 +10,7 @@
 //! - Slot-aligned, priority-truncated text bars in [`bar`].
 //! - Priority-queue [`scheduler`] for async work.
 //! - File [`watcher`] integration.
-//! - Composed [`widgets`] (dialog, grid, image box) and a [`terminal`] session wrapper.
+//! - Composed [`widgets`] (dialog, grid, image viewport) and a [`terminal`] session wrapper.
 //!
 //! ## Stability
 //!
@@ -22,8 +22,8 @@
 //! narrow, or removed pending consumer demand — for example, [`focus`] exposes
 //! only the modal stack c4tui uses, not generic traversal.
 //!
-//! See [`prelude`] for the most common imports. See `PLAN_REWRITE.md` for the
-//! design discipline.
+//! See [`prelude`] for the most common imports. See
+//! `docs/public-surface-retention.txt` for the current retention discipline.
 
 #![warn(missing_debug_implementations)]
 

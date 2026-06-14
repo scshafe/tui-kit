@@ -281,10 +281,11 @@ pub enum ImageOverflowPolicy {
     OverflowAndClipDestination,
     PreventZoomBeyondArea,
     /// The image's logical cell rectangle is allowed to exceed canvas bounds.
-    /// Sample window math is the same as [`CropSourceToArea`] (so panning still
-    /// works), but `target` cell extent is computed from the unclipped display
-    /// size and `clipped_sides` reports the overflow. The consumer decides
-    /// whether to clamp the cell rect before issuing terminal placements.
+    /// Sample window math is the same as
+    /// [`ImageOverflowPolicy::CropSourceToArea`] (so panning still works), but
+    /// `target` cell extent is computed from the unclipped display size and
+    /// `clipped_sides` reports the overflow. The consumer decides whether to
+    /// clamp the cell rect before issuing terminal placements.
     OverflowCellsBeyondArea,
     /// The visible region preserves the image's aspect ratio at every zoom
     /// level by letterboxing within the canvas. Unlike `CropSourceToArea`,

@@ -40,7 +40,7 @@ an application selected a row or what a selected image represents.
 | `layout` | Cell/pixel metrics, placements, transforms, crops, viewport math |
 | `image` | Kitty image registry and image-surface abstraction |
 | `terminal` | Crossterm/ratatui terminal lifecycle plus image flushing |
-| `widgets` | Dialog, grid, image box, and image viewport widgets |
+| `widgets` | Dialog, grid, and image viewport widgets |
 | `bar` | Priority-aware status-line layout |
 | `scheduler` | Priority background work queue and progress accounting |
 | `watcher` | Debounced filesystem watcher |
@@ -81,7 +81,7 @@ the architecture should avoid closing the door on it.
 tui-kit keeps terminal cells and pixels distinct:
 
 - `CellSize` and `CellArea` describe terminal grid dimensions.
-- `PixelSize`, `PixelPoint`, and related types describe pixel dimensions.
+- `PixelSize`, `ImagePoint`, and related types describe pixel dimensions.
 - `CanvasMetrics` ties cells to pixels for one terminal snapshot.
 - `Placement`, `ViewTransform`, and crop structures describe how source pixels
   map into a terminal region.
@@ -252,6 +252,9 @@ modules with `testkit`. Assert app wiring in c4tui tests with
 `FakeTerminalBackend`. If a tui-kit test is reaching for a terminal lifecycle,
 the test belongs on the c4tui side or the production code under test is
 crossing a boundary it shouldn't.
+
+See [docs/testing-patterns.md](./docs/testing-patterns.md) for worked examples
+of both seams.
 
 ## 11. Extension Rules
 

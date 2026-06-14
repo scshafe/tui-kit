@@ -1,0 +1,65 @@
+# tui-kit public-surface retention notes
+#
+# Format:
+# TypeName - Reason this public item remains without a direct c4tui/src,
+# tui-kit/tests, or tui-kit/examples reference.
+#
+# The retention audit accepts these entries as documented consumer pressure.
+Bordered - Element decorator retained with Panel/Window composition; covered by in-module element tests and required by the public ElementExt chain.
+CachedRenderStats - Public cache instrumentation returned by Cached::stats for consumers that need cache-hit assertions.
+CanvasUpdate - Layout delta type retained for image-viewport viewport math and future renderer-frame diffing.
+CellOffset - RenderEffect::PlaceImage origin and ImageSurfaceRegistry::place_at use this as the typed cell position boundary.
+Completion - Scheduler completion record retained with Scheduler for machine-readable background work accounting.
+ComponentChildren - BufferComponent tree-inspection return type used by elements and retained as part of the component contract.
+ConfigError - Validate implementations use this typed configuration diagnostic instead of stringly errors.
+ContainerElement - Marker trait retained for element composition introspection; current implementations live in the elements module.
+EffectElement - Render/effect composition boundary; element containers forward RenderEffect values through this trait.
+ElementBorder - Public border configuration for the Bordered element decorator.
+ElementExt - Public extension trait that exposes the element decorator chain.
+ElementOutcome - Alias retained so element handlers can name outcomes without importing component internals.
+EventScript - Testkit helper for deterministic app-event streams.
+Focusable - Element decorator retained for focus-node exposure in the composition layer.
+GridCellPlacement - Grid render metadata for thumbnail/image anchors; c4tui consumes the higher-level artifact but the grid keeps this as its typed output.
+GridColumnMode - Grid layout policy retained with Grid for callers that need fixed or adaptive columns.
+GridInputOutcome - Grid keyboard routing result used by Grid::handle_key and component adapters.
+GridNavigation - Grid navigation policy retained as a typed alternative to boolean constructor flags.
+GridRenderState - Grid render snapshot retained for tests and future callers that need active/scroll diagnostics.
+ImageBackendPreference - TerminalConfig uses this public policy type for explicit image backend selection.
+ImageCapabilities - Image backend capability report retained with ImageSurface implementations.
+ImageProtocol - ImageBackendPreference exposes this protocol enum for explicit/auto-detect policy.
+ImageSurfaceRegistry - Terminal owns this concrete registry and exposes it through Terminal::images.
+ImageViewportElement - Effect-aware adapter from ImageViewportWidget into the Element/RenderEffect composition layer.
+ImageViewportError - Public error type for image viewport construction, placement, zoom, pan, and export operations.
+KeyMapped - Element decorator retained for local keymap scoping around an element.
+KeyResolution - KeyMap lookup result retained for callers that need to distinguish handled, unbound, and disabled keys.
+KeyScope - Serializable key-scope description retained with WindowFocusScope for modal/window key handling.
+KeyScopeResolver - Strategy trait retained for resolving active key scopes from element/window composition.
+KeyScopeRole - Key scope role enum retained for window and modal composition.
+KittyImageRegistry - Concrete Kitty ImageSurface implementation retained for applications that bypass Terminal.
+MockImageCall - Testkit record type for asserting image lifecycle calls.
+MockImageSurface - Testkit ImageSurface implementation for deterministic image lifecycle assertions.
+NoopImageSurface - Degraded ImageSurface implementation for no-image tests and explicit disabled image mode.
+Overlay - Element container retained for stacked buffer composition with effect forwarding.
+Padded - Element decorator retained for area-transforming composition with effect-origin forwarding.
+Padding - Public padding configuration shared by Padded, Panel, Window, and Modal elements.
+Panel - Presentational element container retained as the canonical chrome wrapper in examples and element tests.
+PixelExtent - Validated non-zero pixel extent used by image viewport sizing and error reporting.
+PixelRect - Typed source rectangle used by PlaceOptions and render-effect image placement.
+PlaceOptions - Image placement command payload shared by ImageSurface and RenderEffect.
+PlacementEngine - Generic placement calculator retained for consumers that need layout planning without ImageViewportWidget.
+RenderEffect - Data-only renderer intent emitted by EffectElement and used by testkit assertions.
+RgbaImage - Owned RGBA pixel buffer for image viewport creation and export paths.
+SchedulerStats - Scheduler instrumentation record for queue-depth/progress reporting.
+ScrollY - Buffer-only element decorator retained for text/list composition.
+Stack - Element container retained for linear layout and effect forwarding.
+StackConstraint - Stack child sizing policy.
+StackDirection - Stack orientation policy.
+TextOverflow - Text rendering policy for Text.
+TransparencySupport - ImageSurface capability enum for alpha-handling decisions.
+UnscaledPixelOffset - ViewTransform stores pan offsets in unscaled source-image pixels.
+Validate - Small config-validation trait used by TerminalConfig and backend policy types.
+WindowChrome - Window rendering configuration retained with the Window element.
+WindowFocusScope - Window key/focus-scope configuration retained with Window.
+WindowLifecycleEvent - Window lifecycle message type emitted by the Window element.
+WindowRenderStats - Window instrumentation for render/activation behavior.
+WindowRepaintPolicy - Window repaint policy retained to make cached window behavior explicit.

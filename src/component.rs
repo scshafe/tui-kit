@@ -1,8 +1,9 @@
 //! Optional component primitives for retained-ish, inspectable UI state.
 //!
-//! **Stability:** consumed by c4tui's `ViewPicker` (via [`BufferComponent`] +
-//! [`Cached`]). The trait shape has been pressure-tested against a real
-//! consumer; further breaking changes should be motivated by additional ports.
+//! **Stability:** consumed by c4tui's `NavPicker` and modal rendering paths
+//! (via [`BufferComponent`] + [`Cached`]). The trait shape has been
+//! pressure-tested against a real consumer; further breaking changes should be
+//! motivated by additional ports.
 //!
 //! The component layer is intentionally small: it gives applications stable
 //! IDs, explicit dirty-state tracking, and a trait shape for reusable UI
@@ -173,9 +174,9 @@ pub type ComponentChildren<'a> = &'a [ComponentId];
 
 /// Buffer-native component shape used by [`Cached`].
 ///
-/// Most components should implement [`Component`] directly. Implement this
-/// trait when rendering can be represented fully in a ratatui [`Buffer`] and is
-/// therefore safe to replay without re-running component-specific render logic.
+/// Implement this trait when rendering can be represented fully in a ratatui
+/// [`Buffer`] and is therefore safe to replay without re-running
+/// component-specific render logic.
 /// Terminal side effects such as image placement should remain explicit dirty
 /// reasons and should not be hidden behind this cache.
 pub trait BufferComponent {

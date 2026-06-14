@@ -26,6 +26,14 @@ jobs:
         working-directory: tui-kit
       - run: cargo doc --no-deps
         working-directory: tui-kit
+      - uses: actions/checkout@v4
+        with:
+          repository: scshafe/c4tui
+          ref: ${{ github.ref_name == 'main' && 'main' || 'migrate-to-demolished-tui-kit' }}
+          path: c4tui
+      - name: Audit public surface retention
+        run: scripts/audit-public-surface.sh --c4tui ../c4tui
+        working-directory: tui-kit
 
   c4tui-consumer-gate:
     name: c4tui consumer gate
