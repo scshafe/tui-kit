@@ -43,7 +43,7 @@ use ratatui::layout::Rect;
 use crate::image::{ImageSurface, ImageSurfaceRegistry, PlaceOptions};
 use crate::layout::CellOffset;
 
-use super::Element;
+use super::core::Element;
 
 /// Explicit, data-only render-host operation produced by an [`EffectElement`].
 ///
