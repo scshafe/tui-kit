@@ -1,12 +1,14 @@
-//! Prototype remote-render protocol helpers for `tui-kit-cli`.
+//! Typed remote-render protocol helpers for `tui-kit-cli`.
 //!
-//! This module is intentionally explicit. It defines the handshake environment
-//! variables, the line-oriented input codec, the `TKF1` frame decoder, and the
-//! transport/session boundary used by the prototype launcher. It is not a
-//! stable wire protocol.
+//! This module defines the remote launcher environment variables, typed JSON
+//! wire messages, length-prefixed `TKF2` framing, input forwarding, and the
+//! transport/session boundary used by the SSH launcher. The protocol is
+//! versioned and intentionally strict: a server must send a valid `Hello`
+//! before frame messages are accepted.
 
+use std::collections::VecDeque;
 use std::fmt;
-use std::io::{BufRead, BufReader, Write};
+use std::io::{Read, Write};
 use std::process::{Child, Command, ExitStatus, Stdio};
 use std::sync::Arc;
 
@@ -15,16 +17,23 @@ use base64::Engine;
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 use ratatui::style::Style;
+use serde::de::DeserializeOwned;
+use serde::{Deserialize, Serialize};
 
 use crate::image::PlaceOptions;
 use crate::input::{InputEvent, KeyEvent, MouseEvent};
-use crate::layout::{CellOffset, PixelRect};
+use crate::layout::CellOffset;
 use crate::renderer::{RenderEffect, RenderFrame};
 
 pub const REMOTE_RENDER_ENV: &str = "TUI_KIT_REMOTE_RENDER";
 pub const REMOTE_PROTOCOL_ENV: &str = "TUI_KIT_REMOTE_PROTOCOL";
-pub const REMOTE_PROTOCOL_VERSION: &str = "tui-kit-remote-v1";
+pub const REMOTE_PROTOCOL_NAME: &str = "tui-kit-remote";
+pub const REMOTE_PROTOCOL_VERSION: &str = "tui-kit-remote-v2";
+pub const REMOTE_MAX_FRAME_BYTES: usize = 16 * 1024 * 1024;
 pub const CLI_USAGE: &str = "usage: tui-kit-cli run ssh://host -- app [args...]";
+
+const FRAME_HEADER_PREFIX: &[u8] = b"TKF2 ";
+const FRAME_HEADER_MAGIC: &str = "TKF2";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RemoteRunSpec {
@@ -135,16 +144,381 @@ impl fmt::Display for RemoteExitStatus {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum RemoteServerMessage {
+    Hello { protocol: String, version: String },
+    Frame { frame: RemoteFrameMessage },
+    Error { message: String },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum RemoteClientMessage {
+    Hello { protocol: String, version: String },
+    Input { event: RemoteInputMessage },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RemoteFrameMessage {
+    pub cols: u16,
+    pub rows: u16,
+    pub text_rows: Vec<RemoteTextRow>,
+    pub effects: Vec<RemoteRenderEffectMessage>,
+}
+
+impl RemoteFrameMessage {
+    pub fn from_render_frame(frame: &RenderFrame) -> Self {
+        let area = frame.area();
+        let mut text_rows = Vec::new();
+        for row in 0..area.height {
+            let mut text = String::new();
+            for col in 0..area.width {
+                let x = area.x.saturating_add(col);
+                let y = area.y.saturating_add(row);
+                if let Some(cell) = frame.buffer().cell((x, y)) {
+                    text.push_str(cell.symbol());
+                }
+            }
+            let text = text.trim_end_matches(' ').to_owned();
+            if !text.is_empty() {
+                text_rows.push(RemoteTextRow { row, text });
+            }
+        }
+        let effects = frame
+            .effects()
+            .iter()
+            .map(RemoteRenderEffectMessage::from)
+            .collect();
+        Self {
+            cols: area.width,
+            rows: area.height,
+            text_rows,
+            effects,
+        }
+    }
+
+    pub fn to_render_frame(&self) -> Result<RenderFrame> {
+        let mut buffer = Buffer::empty(Rect::new(0, 0, self.cols, self.rows));
+        for row in &self.text_rows {
+            if row.row >= self.rows {
+                bail!(
+                    "remote text row {} is outside frame height {}",
+                    row.row,
+                    self.rows
+                );
+            }
+            buffer.set_string(0, row.row, &row.text, Style::default());
+        }
+        let effects = self
+            .effects
+            .iter()
+            .cloned()
+            .map(RenderEffect::try_from)
+            .collect::<Result<Vec<_>>>()?;
+        Ok(RenderFrame::new(buffer, effects))
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RemoteTextRow {
+    pub row: u16,
+    pub text: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum RemoteRenderEffectMessage {
+    EnsureImageLoaded {
+        image_id: u32,
+        png_base64: String,
+    },
+    PlaceImage {
+        origin: CellOffset,
+        options: PlaceOptions,
+    },
+    DeleteImagePlacement {
+        image_id: u32,
+        placement_id: u32,
+    },
+    DeletePlacement {
+        placement_id: u32,
+    },
+    DeleteAllPlacements,
+    ForgetAllImages,
+    FlushImages,
+}
+
+impl From<&RenderEffect> for RemoteRenderEffectMessage {
+    fn from(effect: &RenderEffect) -> Self {
+        match effect {
+            RenderEffect::EnsureImageLoaded { image_id, png } => Self::EnsureImageLoaded {
+                image_id: *image_id,
+                png_base64: base64::engine::general_purpose::STANDARD.encode(png),
+            },
+            RenderEffect::PlaceImage { origin, options } => Self::PlaceImage {
+                origin: *origin,
+                options: *options,
+            },
+            RenderEffect::DeleteImagePlacement {
+                image_id,
+                placement_id,
+            } => Self::DeleteImagePlacement {
+                image_id: *image_id,
+                placement_id: *placement_id,
+            },
+            RenderEffect::DeletePlacement { placement_id } => Self::DeletePlacement {
+                placement_id: *placement_id,
+            },
+            RenderEffect::DeleteAllPlacements => Self::DeleteAllPlacements,
+            RenderEffect::ForgetAllImages => Self::ForgetAllImages,
+            RenderEffect::FlushImages => Self::FlushImages,
+        }
+    }
+}
+
+impl TryFrom<RemoteRenderEffectMessage> for RenderEffect {
+    type Error = anyhow::Error;
+
+    fn try_from(effect: RemoteRenderEffectMessage) -> Result<Self> {
+        Ok(match effect {
+            RemoteRenderEffectMessage::EnsureImageLoaded {
+                image_id,
+                png_base64,
+            } => {
+                let png = base64::engine::general_purpose::STANDARD
+                    .decode(png_base64)
+                    .context("invalid remote image payload base64")?;
+                Self::EnsureImageLoaded {
+                    image_id,
+                    png: Arc::from(png.into_boxed_slice()),
+                }
+            }
+            RemoteRenderEffectMessage::PlaceImage { origin, options } => {
+                Self::PlaceImage { origin, options }
+            }
+            RemoteRenderEffectMessage::DeleteImagePlacement {
+                image_id,
+                placement_id,
+            } => Self::DeleteImagePlacement {
+                image_id,
+                placement_id,
+            },
+            RemoteRenderEffectMessage::DeletePlacement { placement_id } => {
+                Self::DeletePlacement { placement_id }
+            }
+            RemoteRenderEffectMessage::DeleteAllPlacements => Self::DeleteAllPlacements,
+            RemoteRenderEffectMessage::ForgetAllImages => Self::ForgetAllImages,
+            RemoteRenderEffectMessage::FlushImages => Self::FlushImages,
+        })
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum RemoteInputMessage {
+    Key { key: RemoteKeyMessage },
+    Mouse { mouse: RemoteMouseMessage },
+    Resize { cols: u16, rows: u16 },
+}
+
+impl From<InputEvent> for RemoteInputMessage {
+    fn from(input: InputEvent) -> Self {
+        match input {
+            InputEvent::Key(key) => Self::Key { key: key.into() },
+            InputEvent::Mouse(mouse) => Self::Mouse {
+                mouse: mouse.into(),
+            },
+            InputEvent::Resize { cols, rows } => Self::Resize { cols, rows },
+        }
+    }
+}
+
+impl From<RemoteInputMessage> for InputEvent {
+    fn from(input: RemoteInputMessage) -> Self {
+        match input {
+            RemoteInputMessage::Key { key } => Self::Key(key.into()),
+            RemoteInputMessage::Mouse { mouse } => Self::Mouse(mouse.into()),
+            RemoteInputMessage::Resize { cols, rows } => Self::Resize { cols, rows },
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum RemoteKeyMessage {
+    Char { ch: char },
+    Up,
+    Down,
+    Left,
+    Right,
+    Enter,
+    Tab,
+    Back,
+    Esc,
+    CtrlC,
+    Unknown,
+}
+
+impl From<KeyEvent> for RemoteKeyMessage {
+    fn from(key: KeyEvent) -> Self {
+        match key {
+            KeyEvent::Char(ch) => Self::Char { ch },
+            KeyEvent::Up => Self::Up,
+            KeyEvent::Down => Self::Down,
+            KeyEvent::Left => Self::Left,
+            KeyEvent::Right => Self::Right,
+            KeyEvent::Enter => Self::Enter,
+            KeyEvent::Tab => Self::Tab,
+            KeyEvent::Back => Self::Back,
+            KeyEvent::Esc => Self::Esc,
+            KeyEvent::CtrlC => Self::CtrlC,
+            KeyEvent::Unknown => Self::Unknown,
+        }
+    }
+}
+
+impl From<RemoteKeyMessage> for KeyEvent {
+    fn from(key: RemoteKeyMessage) -> Self {
+        match key {
+            RemoteKeyMessage::Char { ch } => Self::Char(ch),
+            RemoteKeyMessage::Up => Self::Up,
+            RemoteKeyMessage::Down => Self::Down,
+            RemoteKeyMessage::Left => Self::Left,
+            RemoteKeyMessage::Right => Self::Right,
+            RemoteKeyMessage::Enter => Self::Enter,
+            RemoteKeyMessage::Tab => Self::Tab,
+            RemoteKeyMessage::Back => Self::Back,
+            RemoteKeyMessage::Esc => Self::Esc,
+            RemoteKeyMessage::CtrlC => Self::CtrlC,
+            RemoteKeyMessage::Unknown => Self::Unknown,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum RemoteMouseMessage {
+    Click { x: u16, y: u16 },
+    Drag { x: u16, y: u16 },
+    WheelUp { x: u16, y: u16 },
+    WheelDown { x: u16, y: u16 },
+    Release,
+}
+
+impl From<MouseEvent> for RemoteMouseMessage {
+    fn from(mouse: MouseEvent) -> Self {
+        match mouse {
+            MouseEvent::Click { x, y } => Self::Click { x, y },
+            MouseEvent::Drag { x, y } => Self::Drag { x, y },
+            MouseEvent::WheelUp { x, y } => Self::WheelUp { x, y },
+            MouseEvent::WheelDown { x, y } => Self::WheelDown { x, y },
+            MouseEvent::Release => Self::Release,
+        }
+    }
+}
+
+impl From<RemoteMouseMessage> for MouseEvent {
+    fn from(mouse: RemoteMouseMessage) -> Self {
+        match mouse {
+            RemoteMouseMessage::Click { x, y } => Self::Click { x, y },
+            RemoteMouseMessage::Drag { x, y } => Self::Drag { x, y },
+            RemoteMouseMessage::WheelUp { x, y } => Self::WheelUp { x, y },
+            RemoteMouseMessage::WheelDown { x, y } => Self::WheelDown { x, y },
+            RemoteMouseMessage::Release => Self::Release,
+        }
+    }
+}
+
+pub fn encode_server_message(message: &RemoteServerMessage) -> Result<Vec<u8>> {
+    encode_protocol_message(message)
+}
+
+pub fn decode_server_message(frame: &[u8]) -> Result<RemoteServerMessage> {
+    decode_protocol_message(frame)
+}
+
+pub fn encode_client_message(message: &RemoteClientMessage) -> Result<Vec<u8>> {
+    encode_protocol_message(message)
+}
+
+pub fn decode_client_message(frame: &[u8]) -> Result<RemoteClientMessage> {
+    decode_protocol_message(frame)
+}
+
+fn encode_protocol_message<T: Serialize>(message: &T) -> Result<Vec<u8>> {
+    let payload =
+        serde_json::to_vec(message).context("failed to encode remote protocol message")?;
+    if payload.len() > REMOTE_MAX_FRAME_BYTES {
+        bail!(
+            "remote payload length {} exceeds maximum {}",
+            payload.len(),
+            REMOTE_MAX_FRAME_BYTES
+        );
+    }
+    let mut frame = format!("{FRAME_HEADER_MAGIC} {}\n", payload.len()).into_bytes();
+    frame.extend_from_slice(&payload);
+    Ok(frame)
+}
+
+fn decode_protocol_message<T: DeserializeOwned>(frame: &[u8]) -> Result<T> {
+    let newline = frame
+        .iter()
+        .position(|byte| *byte == b'\n')
+        .ok_or_else(|| anyhow!("remote protocol frame missing header terminator"))?;
+    let length = parse_header_length(&frame[..newline])?;
+    let payload_start = newline + 1;
+    let payload_end = payload_start
+        .checked_add(length)
+        .ok_or_else(|| anyhow!("remote payload length overflow"))?;
+    if frame.len() < payload_end {
+        bail!("remote protocol frame ended before payload was complete");
+    }
+    if frame.len() > payload_end {
+        bail!("remote protocol frame contains trailing bytes");
+    }
+    decode_payload(&frame[payload_start..payload_end])
+}
+
+fn decode_payload<T: DeserializeOwned>(payload: &[u8]) -> Result<T> {
+    let json = std::str::from_utf8(payload).context("remote protocol payload is not utf-8")?;
+    serde_json::from_str(json).context("malformed remote protocol message")
+}
+
+fn parse_header_length(header: &[u8]) -> Result<usize> {
+    let header = std::str::from_utf8(header).context("remote protocol header is not utf-8")?;
+    let mut parts = header.split_whitespace();
+    let Some(magic) = parts.next() else {
+        bail!("remote protocol header is empty");
+    };
+    if magic != FRAME_HEADER_MAGIC {
+        bail!("invalid remote protocol header: {header}");
+    }
+    let length = parts
+        .next()
+        .ok_or_else(|| anyhow!("remote protocol header missing payload length"))?;
+    if parts.next().is_some() {
+        bail!("invalid remote protocol header: {header}");
+    }
+    let length = length
+        .parse::<usize>()
+        .context("invalid remote payload length")?;
+    if length > REMOTE_MAX_FRAME_BYTES {
+        bail!("remote payload length {length} exceeds maximum {REMOTE_MAX_FRAME_BYTES}");
+    }
+    Ok(length)
+}
+
 pub trait RemoteInputWriter {
     fn write_input_event(&mut self, input: InputEvent) -> Result<()>;
 }
 
 #[derive(Debug)]
-pub struct RemoteLineInputWriter<W> {
+pub struct RemoteProtocolInputWriter<W> {
     writer: W,
 }
 
-impl<W> RemoteLineInputWriter<W> {
+impl<W> RemoteProtocolInputWriter<W> {
     pub fn new(writer: W) -> Self {
         Self { writer }
     }
@@ -154,19 +528,29 @@ impl<W> RemoteLineInputWriter<W> {
     }
 }
 
-impl<W: Write> RemoteInputWriter for RemoteLineInputWriter<W> {
-    fn write_input_event(&mut self, input: InputEvent) -> Result<()> {
-        writeln!(self.writer, "{}", encode_input_event(input))
-            .context("failed to write remote input event")?;
+impl<W: Write> RemoteProtocolInputWriter<W> {
+    pub fn write_client_message(&mut self, message: &RemoteClientMessage) -> Result<()> {
+        let frame = encode_client_message(message)?;
+        self.writer
+            .write_all(&frame)
+            .context("failed to write remote protocol message")?;
         self.writer
             .flush()
-            .context("failed to flush remote input event")?;
+            .context("failed to flush remote protocol message")?;
         Ok(())
     }
 }
 
+impl<W: Write> RemoteInputWriter for RemoteProtocolInputWriter<W> {
+    fn write_input_event(&mut self, input: InputEvent) -> Result<()> {
+        self.write_client_message(&RemoteClientMessage::Input {
+            event: input.into(),
+        })
+    }
+}
+
 pub trait RemoteTransport {
-    fn read_output_line(&mut self) -> Result<Option<String>>;
+    fn read_output(&mut self, buf: &mut [u8]) -> Result<usize>;
     fn try_wait(&mut self) -> Result<Option<RemoteExitStatus>>;
     fn wait(&mut self) -> Result<RemoteExitStatus>;
     fn stderr_policy(&self) -> RemoteStderrPolicy;
@@ -175,7 +559,7 @@ pub trait RemoteTransport {
 #[derive(Debug)]
 pub struct SshRemoteTransport {
     child: Child,
-    stdout: BufReader<std::process::ChildStdout>,
+    stdout: std::process::ChildStdout,
     stderr_policy: RemoteStderrPolicy,
 }
 
@@ -203,31 +587,19 @@ impl SshRemoteTransport {
         Ok((
             Self {
                 child,
-                stdout: BufReader::new(stdout),
+                stdout,
                 stderr_policy,
             },
-            RemoteLineInputWriter::new(stdin),
+            RemoteProtocolInputWriter::new(stdin),
         ))
     }
 }
 
 impl RemoteTransport for SshRemoteTransport {
-    fn read_output_line(&mut self) -> Result<Option<String>> {
-        let mut line = String::new();
-        let bytes = self
-            .stdout
-            .read_line(&mut line)
-            .context("failed to read remote stdout")?;
-        if bytes == 0 {
-            return Ok(None);
-        }
-        if line.ends_with('\n') {
-            line.pop();
-            if line.ends_with('\r') {
-                line.pop();
-            }
-        }
-        Ok(Some(line))
+    fn read_output(&mut self, buf: &mut [u8]) -> Result<usize> {
+        self.stdout
+            .read(buf)
+            .context("failed to read remote stdout")
     }
 
     fn try_wait(&mut self) -> Result<Option<RemoteExitStatus>> {
@@ -249,131 +621,122 @@ impl RemoteTransport for SshRemoteTransport {
     }
 }
 
-pub fn encode_input_event(input: InputEvent) -> String {
-    match input {
-        InputEvent::Key(key) => encode_key_event(key),
-        InputEvent::Mouse(mouse) => encode_mouse_event(mouse),
-        InputEvent::Resize { cols, rows } => format!("resize {cols} {rows}"),
-    }
-}
-
-pub fn decode_input_event(line: &str) -> Result<InputEvent> {
-    let parts = line.split_whitespace().collect::<Vec<_>>();
-    match parts.as_slice() {
-        ["key", "char", codepoint] => {
-            let value = parse_u32(codepoint, "char codepoint")?;
-            let Some(ch) = char::from_u32(value) else {
-                bail!("invalid char codepoint: {value}");
-            };
-            Ok(InputEvent::Key(KeyEvent::Char(ch)))
-        }
-        ["key", name] => Ok(InputEvent::Key(decode_named_key(name)?)),
-        ["mouse", "click", x, y] => Ok(InputEvent::Mouse(MouseEvent::Click {
-            x: parse_u16(x, "mouse x")?,
-            y: parse_u16(y, "mouse y")?,
-        })),
-        ["mouse", "drag", x, y] => Ok(InputEvent::Mouse(MouseEvent::Drag {
-            x: parse_u16(x, "mouse x")?,
-            y: parse_u16(y, "mouse y")?,
-        })),
-        ["mouse", "wheel-up", x, y] => Ok(InputEvent::Mouse(MouseEvent::WheelUp {
-            x: parse_u16(x, "mouse x")?,
-            y: parse_u16(y, "mouse y")?,
-        })),
-        ["mouse", "wheel-down", x, y] => Ok(InputEvent::Mouse(MouseEvent::WheelDown {
-            x: parse_u16(x, "mouse x")?,
-            y: parse_u16(y, "mouse y")?,
-        })),
-        ["mouse", "release"] => Ok(InputEvent::Mouse(MouseEvent::Release)),
-        ["resize", cols, rows] => Ok(InputEvent::Resize {
-            cols: parse_u16(cols, "resize cols")?,
-            rows: parse_u16(rows, "resize rows")?,
-        }),
-        _ => bail!("invalid input event line: {line}"),
-    }
-}
-
-fn encode_key_event(key: KeyEvent) -> String {
-    match key {
-        KeyEvent::Char(ch) => format!("key char {}", u32::from(ch)),
-        KeyEvent::Up => "key up".to_owned(),
-        KeyEvent::Down => "key down".to_owned(),
-        KeyEvent::Left => "key left".to_owned(),
-        KeyEvent::Right => "key right".to_owned(),
-        KeyEvent::Enter => "key enter".to_owned(),
-        KeyEvent::Tab => "key tab".to_owned(),
-        KeyEvent::Back => "key back".to_owned(),
-        KeyEvent::Esc => "key esc".to_owned(),
-        KeyEvent::CtrlC => "key ctrl-c".to_owned(),
-        KeyEvent::Unknown => "key unknown".to_owned(),
-    }
-}
-
-fn decode_named_key(name: &str) -> Result<KeyEvent> {
-    Ok(match name {
-        "up" => KeyEvent::Up,
-        "down" => KeyEvent::Down,
-        "left" => KeyEvent::Left,
-        "right" => KeyEvent::Right,
-        "enter" => KeyEvent::Enter,
-        "tab" => KeyEvent::Tab,
-        "back" => KeyEvent::Back,
-        "esc" => KeyEvent::Esc,
-        "ctrl-c" => KeyEvent::CtrlC,
-        "unknown" => KeyEvent::Unknown,
-        _ => bail!("invalid key name: {name}"),
-    })
-}
-
-fn encode_mouse_event(mouse: MouseEvent) -> String {
-    match mouse {
-        MouseEvent::Click { x, y } => format!("mouse click {x} {y}"),
-        MouseEvent::Drag { x, y } => format!("mouse drag {x} {y}"),
-        MouseEvent::WheelUp { x, y } => format!("mouse wheel-up {x} {y}"),
-        MouseEvent::WheelDown { x, y } => format!("mouse wheel-down {x} {y}"),
-        MouseEvent::Release => "mouse release".to_owned(),
-    }
-}
-
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum RemoteOutput {
-    Frame(RenderFrame),
+pub enum RemoteProtocolOutput {
+    Message(RemoteServerMessage),
     Passthrough(String),
 }
 
 #[derive(Debug, Default)]
-pub struct RemoteFrameDecoder {
-    pending: Vec<String>,
+pub struct RemoteProtocolDecoder {
+    buffer: Vec<u8>,
 }
 
-impl RemoteFrameDecoder {
+impl RemoteProtocolDecoder {
     pub fn new() -> Self {
         Self::default()
     }
 
     pub fn is_pending(&self) -> bool {
-        !self.pending.is_empty()
+        !self.buffer.is_empty()
     }
 
-    pub fn push_line(&mut self, line: impl Into<String>) -> Result<Option<RemoteOutput>> {
-        let line = line.into();
-        if self.pending.is_empty() {
-            if line.starts_with("TKF1 ") {
-                self.pending.push(line);
+    pub fn push_bytes(&mut self, bytes: &[u8]) -> Result<Vec<RemoteProtocolOutput>> {
+        self.buffer.extend_from_slice(bytes);
+        let mut outputs = Vec::new();
+        while let Some(output) = self.next_output()? {
+            outputs.push(output);
+        }
+        Ok(outputs)
+    }
+
+    pub fn finish(&mut self) -> Result<Option<RemoteProtocolOutput>> {
+        if self.buffer.is_empty() {
+            return Ok(None);
+        }
+        if self.buffer.starts_with(FRAME_HEADER_PREFIX) {
+            let Some(header_end) = self.buffer.iter().position(|byte| *byte == b'\n') else {
+                bail!("remote stream ended before completing a protocol header");
+            };
+            let length = parse_header_length(&self.buffer[..header_end])?;
+            let payload_start = header_end + 1;
+            if self.buffer.len() < payload_start + length {
+                bail!("remote stream ended before completing a protocol payload");
+            }
+            return self.next_output();
+        }
+        if starts_with_header_magic(&self.buffer) {
+            bail!("remote stream ended before completing a protocol header");
+        }
+        let line = std::mem::take(&mut self.buffer);
+        Ok(Some(RemoteProtocolOutput::Passthrough(
+            passthrough_from_bytes(line)?,
+        )))
+    }
+
+    fn next_output(&mut self) -> Result<Option<RemoteProtocolOutput>> {
+        if self.buffer.is_empty() {
+            return Ok(None);
+        }
+
+        if self.buffer.starts_with(FRAME_HEADER_PREFIX) {
+            let Some(header_end) = self.buffer.iter().position(|byte| *byte == b'\n') else {
+                return Ok(None);
+            };
+            let length = parse_header_length(&self.buffer[..header_end])?;
+            let payload_start = header_end + 1;
+            let payload_end = payload_start
+                .checked_add(length)
+                .ok_or_else(|| anyhow!("remote payload length overflow"))?;
+            if self.buffer.len() < payload_end {
                 return Ok(None);
             }
-            return Ok(Some(RemoteOutput::Passthrough(line)));
+            let payload = self.buffer[payload_start..payload_end].to_vec();
+            self.buffer.drain(..payload_end);
+            return Ok(Some(RemoteProtocolOutput::Message(decode_payload(
+                &payload,
+            )?)));
         }
 
-        self.pending.push(line);
-        if self.pending.last().map(String::as_str) == Some("END") {
-            let lines = self.pending.iter().map(String::as_str).collect::<Vec<_>>();
-            let result = decode_frame(&lines).map(RemoteOutput::Frame);
-            self.pending.clear();
-            return result.map(Some);
+        if is_partial_header_prefix(&self.buffer) {
+            return Ok(None);
         }
-        Ok(None)
+
+        if starts_with_header_magic(&self.buffer) {
+            let Some(header_end) = self.buffer.iter().position(|byte| *byte == b'\n') else {
+                return Ok(None);
+            };
+            let invalid = String::from_utf8_lossy(&self.buffer[..header_end]);
+            bail!("invalid remote protocol header: {invalid}");
+        }
+
+        let Some(line_end) = self.buffer.iter().position(|byte| *byte == b'\n') else {
+            return Ok(None);
+        };
+        let line = self.buffer.drain(..=line_end).collect::<Vec<_>>();
+        Ok(Some(RemoteProtocolOutput::Passthrough(
+            passthrough_from_bytes(line)?,
+        )))
     }
+}
+
+fn is_partial_header_prefix(buffer: &[u8]) -> bool {
+    buffer.len() < FRAME_HEADER_PREFIX.len() && FRAME_HEADER_PREFIX.starts_with(buffer)
+}
+
+fn starts_with_header_magic(buffer: &[u8]) -> bool {
+    buffer.len() >= FRAME_HEADER_MAGIC.len()
+        && &buffer[..FRAME_HEADER_MAGIC.len()] == FRAME_HEADER_MAGIC.as_bytes()
+}
+
+fn passthrough_from_bytes(mut bytes: Vec<u8>) -> Result<String> {
+    if bytes.ends_with(b"\n") {
+        bytes.pop();
+        if bytes.ends_with(b"\r") {
+            bytes.pop();
+        }
+    }
+    String::from_utf8(bytes).context("remote passthrough output is not utf-8")
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -397,8 +760,10 @@ pub enum RemoteSessionEvent {
 #[derive(Debug)]
 pub struct RemoteSession<T> {
     transport: T,
-    decoder: RemoteFrameDecoder,
+    decoder: RemoteProtocolDecoder,
+    pending_outputs: VecDeque<RemoteProtocolOutput>,
     state: RemoteSessionState,
+    negotiated: bool,
     saw_frame: bool,
 }
 
@@ -406,8 +771,10 @@ impl<T: RemoteTransport> RemoteSession<T> {
     pub fn new(transport: T) -> Self {
         Self {
             transport,
-            decoder: RemoteFrameDecoder::new(),
+            decoder: RemoteProtocolDecoder::new(),
+            pending_outputs: VecDeque::new(),
             state: RemoteSessionState::Startup,
+            negotiated: false,
             saw_frame: false,
         }
     }
@@ -429,19 +796,22 @@ impl<T: RemoteTransport> RemoteSession<T> {
     }
 
     pub fn next_event(&mut self) -> Result<RemoteSessionEvent> {
-        if !self.saw_frame
-            && matches!(
-                self.state,
-                RemoteSessionState::Startup | RemoteSessionState::Passthrough
-            )
-        {
-            self.state = RemoteSessionState::AwaitingFirstFrame;
-        }
-
         loop {
-            let Some(line) = self.transport.read_output_line()? else {
-                if self.decoder.is_pending() {
-                    bail!("remote stream ended before completing a frame");
+            if let Some(output) = self.pending_outputs.pop_front() {
+                if let Some(event) = self.handle_output(output)? {
+                    return Ok(event);
+                }
+                continue;
+            }
+
+            let mut bytes = [0u8; 8192];
+            let count = self.transport.read_output(&mut bytes)?;
+            if count == 0 {
+                if let Some(output) = self.decoder.finish()? {
+                    if let Some(event) = self.handle_output(output)? {
+                        return Ok(event);
+                    }
+                    continue;
                 }
                 if let Some(status) = self.transport.try_wait()? {
                     self.state = RemoteSessionState::ChildExited;
@@ -449,145 +819,75 @@ impl<T: RemoteTransport> RemoteSession<T> {
                 }
                 self.state = RemoteSessionState::Eof;
                 return Ok(RemoteSessionEvent::Eof);
-            };
-
-            match self.decoder.push_line(line)? {
-                Some(RemoteOutput::Frame(frame)) => {
-                    self.saw_frame = true;
-                    self.state = RemoteSessionState::Streaming;
-                    return Ok(RemoteSessionEvent::Frame(frame));
-                }
-                Some(RemoteOutput::Passthrough(line)) => {
-                    self.state = RemoteSessionState::Passthrough;
-                    return Ok(RemoteSessionEvent::Passthrough(line));
-                }
-                None => {}
             }
+
+            self.pending_outputs
+                .extend(self.decoder.push_bytes(&bytes[..count])?);
         }
     }
 
     pub fn wait_for_exit(&mut self) -> Result<RemoteExitStatus> {
         if self.decoder.is_pending() {
-            bail!("remote stream ended before completing a frame");
+            bail!("remote stream ended before completing a protocol message");
         }
         let status = self.transport.wait()?;
         self.state = RemoteSessionState::ChildExited;
         Ok(status)
     }
-}
 
-pub fn decode_frame(lines: &[impl AsRef<str>]) -> Result<RenderFrame> {
-    let first = lines
-        .first()
-        .map(AsRef::as_ref)
-        .ok_or_else(|| anyhow!("remote frame is empty"))?;
-    let header = first.split_whitespace().collect::<Vec<_>>();
-    let ["TKF1", cols, rows] = header.as_slice() else {
-        bail!("invalid remote frame header: {first}");
-    };
-    let cols = parse_u16(cols, "frame cols")?;
-    let rows = parse_u16(rows, "frame rows")?;
-    let mut buffer = Buffer::empty(Rect::new(0, 0, cols, rows));
-    let mut effects = Vec::new();
-    let mut ended = false;
-
-    for raw in lines.iter().skip(1).map(AsRef::as_ref) {
-        if raw == "END" {
-            ended = true;
-            break;
+    fn handle_output(
+        &mut self,
+        output: RemoteProtocolOutput,
+    ) -> Result<Option<RemoteSessionEvent>> {
+        match output {
+            RemoteProtocolOutput::Passthrough(line) => {
+                self.state = RemoteSessionState::Passthrough;
+                Ok(Some(RemoteSessionEvent::Passthrough(line)))
+            }
+            RemoteProtocolOutput::Message(message) => self.handle_message(message),
         }
-        if let Some(rest) = raw.strip_prefix("TEXT ") {
-            decode_text_line(rest, rows, &mut buffer)?;
-            continue;
-        }
-        if let Some(rest) = raw.strip_prefix("EFFECT ") {
-            effects.push(decode_effect(rest)?);
-            continue;
-        }
-        bail!("invalid remote frame line: {raw}");
     }
 
-    if !ended {
-        bail!("remote frame missing END line");
-    }
-
-    Ok(RenderFrame::new(buffer, effects))
-}
-
-fn decode_text_line(rest: &str, rows: u16, buffer: &mut Buffer) -> Result<()> {
-    let mut parts = rest.splitn(2, ' ');
-    let row = parts
-        .next()
-        .ok_or_else(|| anyhow!("TEXT line missing row"))?;
-    let text = parts
-        .next()
-        .ok_or_else(|| anyhow!("TEXT line missing base64 text"))?;
-    let row = parse_u16(row, "text row")?;
-    if row >= rows {
-        bail!("TEXT row {row} is outside frame height {rows}");
-    }
-    let decoded = base64::engine::general_purpose::STANDARD
-        .decode(text)
-        .context("invalid TEXT base64")?;
-    let text = String::from_utf8(decoded).context("TEXT payload is not utf-8")?;
-    buffer.set_string(0, row, text, Style::default());
-    Ok(())
-}
-
-fn decode_effect(rest: &str) -> Result<RenderEffect> {
-    let parts = rest.split_whitespace().collect::<Vec<_>>();
-    Ok(match parts.as_slice() {
-        ["ensure_image_loaded", image_id, png] => {
-            let png = base64::engine::general_purpose::STANDARD
-                .decode(png)
-                .context("invalid image payload base64")?;
-            RenderEffect::EnsureImageLoaded {
-                image_id: parse_u32(image_id, "image_id")?,
-                png: Arc::from(png.into_boxed_slice()),
+    fn handle_message(
+        &mut self,
+        message: RemoteServerMessage,
+    ) -> Result<Option<RemoteSessionEvent>> {
+        match message {
+            RemoteServerMessage::Hello { protocol, version } => {
+                self.validate_hello(&protocol, &version)?;
+                self.negotiated = true;
+                if !self.saw_frame {
+                    self.state = RemoteSessionState::AwaitingFirstFrame;
+                }
+                Ok(None)
+            }
+            RemoteServerMessage::Frame { frame } => {
+                if !self.negotiated {
+                    bail!("remote frame received before protocol hello");
+                }
+                let frame = frame.to_render_frame()?;
+                self.saw_frame = true;
+                self.state = RemoteSessionState::Streaming;
+                Ok(Some(RemoteSessionEvent::Frame(frame)))
+            }
+            RemoteServerMessage::Error { message } => {
+                bail!("remote protocol error: {message}");
             }
         }
-        ["place_image", image_id, placement_id, origin_col, origin_row, source_x, source_y, source_width, source_height, cell_cols, cell_rows] => {
-            RenderEffect::PlaceImage {
-                origin: CellOffset {
-                    col: parse_u16(origin_col, "origin_col")?,
-                    row: parse_u16(origin_row, "origin_row")?,
-                },
-                options: PlaceOptions {
-                    image_id: parse_u32(image_id, "image_id")?,
-                    placement_id: parse_u32(placement_id, "placement_id")?,
-                    source: PixelRect {
-                        x: parse_u32(source_x, "source_x")?,
-                        y: parse_u32(source_y, "source_y")?,
-                        width: parse_u32(source_width, "source_width")?,
-                        height: parse_u32(source_height, "source_height")?,
-                    },
-                    cell_cols: parse_u16(cell_cols, "cell_cols")?,
-                    cell_rows: parse_u16(cell_rows, "cell_rows")?,
-                },
-            }
+    }
+
+    fn validate_hello(&self, protocol: &str, version: &str) -> Result<()> {
+        if self.negotiated {
+            bail!("remote protocol hello received more than once");
         }
-        ["delete_image_placement", image_id, placement_id] => RenderEffect::DeleteImagePlacement {
-            image_id: parse_u32(image_id, "image_id")?,
-            placement_id: parse_u32(placement_id, "placement_id")?,
-        },
-        ["delete_placement", placement_id] => RenderEffect::DeletePlacement {
-            placement_id: parse_u32(placement_id, "placement_id")?,
-        },
-        ["delete_all_placements"] => RenderEffect::DeleteAllPlacements,
-        ["forget_all_images"] => RenderEffect::ForgetAllImages,
-        ["flush_images"] => RenderEffect::FlushImages,
-        _ => bail!("invalid EFFECT line: {rest}"),
-    })
-}
-
-fn parse_u16(value: &str, name: &str) -> Result<u16> {
-    value
-        .parse::<u16>()
-        .with_context(|| format!("invalid {name}"))
-}
-
-fn parse_u32(value: &str, name: &str) -> Result<u32> {
-    value
-        .parse::<u32>()
-        .with_context(|| format!("invalid {name}"))
+        if protocol != REMOTE_PROTOCOL_NAME {
+            bail!("remote protocol mismatch: expected {REMOTE_PROTOCOL_NAME}, got {protocol}");
+        }
+        if version != REMOTE_PROTOCOL_VERSION {
+            bail!(
+                "remote protocol version mismatch: expected {REMOTE_PROTOCOL_VERSION}, got {version}"
+            );
+        }
+        Ok(())
+    }
 }

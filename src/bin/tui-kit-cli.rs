@@ -115,3 +115,22 @@ where
     });
     InputWriterHandle { stop, handle }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn input_writer_handle_stops_and_joins_thread() {
+        let stop = Arc::new(AtomicBool::new(false));
+        let thread_stop = Arc::clone(&stop);
+        let handle = thread::spawn(move || -> Result<()> {
+            while !thread_stop.load(Ordering::SeqCst) {
+                thread::sleep(Duration::from_millis(1));
+            }
+            Ok(())
+        });
+
+        InputWriterHandle { stop, handle }.stop_and_join().unwrap();
+    }
+}

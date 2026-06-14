@@ -52,6 +52,17 @@ PlaceOptions - Image placement command payload shared by ImageSurface and Render
 PlacementAnchor - Placement output reports the image-space anchor point for consumers that surface pan/zoom diagnostics.
 PlacementEngine - Generic placement calculator retained for consumers that need layout planning without ImageViewportWidget.
 RenderEffect - Data-only renderer intent emitted by EffectElement and used by testkit assertions.
+RemoteClientMessage - Typed client-to-server remote protocol envelope used by remote input writers and compatible remote apps.
+RemoteFrameMessage - Typed remote frame payload that carries default-style text rows and renderer effects.
+RemoteInputMessage - Serializable input-event payload for forwarding keyboard, mouse, and resize events to remote apps.
+RemoteKeyMessage - Wire-safe representation of KeyEvent variants for remote input forwarding.
+RemoteMouseMessage - Wire-safe representation of MouseEvent variants for remote input forwarding.
+RemoteProtocolDecoder - Streaming TKF2 decoder retained for clients that need passthrough separation before protocol negotiation.
+RemoteProtocolInputWriter - Generic writer that frames typed client messages for remote app stdin.
+RemoteProtocolOutput - Decoder output boundary between pre-protocol passthrough and typed server messages.
+RemoteRenderEffectMessage - Serializable render-effect payload for the typed remote frame protocol.
+RemoteServerMessage - Typed server-to-client remote protocol envelope used for Hello, Frame, and Error messages.
+RemoteTextRow - Default-style text-row payload retained with RemoteFrameMessage until styled-cell transport is planned.
 RgbaImage - Owned RGBA pixel buffer for image viewport creation and export paths.
 SchedulerStats - Scheduler instrumentation record for queue-depth/progress reporting.
 ScrollY - Buffer-only element decorator retained for text/list composition.

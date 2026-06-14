@@ -7,7 +7,7 @@
 //! - Cell + pixel [`tty`] metrics.
 //! - Image lifecycle surfaces in [`image`].
 //! - Buffer/effect renderer backend contract in [`renderer`].
-//! - Prototype remote launcher protocol helpers in [`remote`].
+//! - Typed remote launcher protocol helpers in [`remote`].
 //! - Generic placement / fit / pan / zoom math in [`layout`].
 //! - Slot-aligned, priority-truncated text bars in [`bar`].
 //! - Priority-queue [`scheduler`] for async work.
