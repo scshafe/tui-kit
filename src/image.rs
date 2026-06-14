@@ -28,7 +28,6 @@
 
 use crate::config::{ConfigError, Validate};
 use crate::layout::{CellOffset, PixelRect, PixelSize};
-use crate::tty::write_stdout_all;
 use anyhow::Result;
 use base64::Engine;
 use serde::{Deserialize, Serialize};
@@ -363,13 +362,49 @@ impl ImageSurface for NoopImageSurface {
     }
 }
 
+trait KittyOutput {
+    fn write_all(&self, bytes: &[u8]) -> io::Result<()>;
+    fn flush(&self) -> io::Result<()>;
+}
+
 #[derive(Debug, Default)]
+struct StdoutKittyOutput;
+
+impl KittyOutput for StdoutKittyOutput {
+    fn write_all(&self, bytes: &[u8]) -> io::Result<()> {
+        let mut stdout = io::stdout().lock();
+        stdout.write_all(bytes)
+    }
+
+    fn flush(&self) -> io::Result<()> {
+        io::stdout().flush()
+    }
+}
+
 pub struct KittyImageRegistry {
     loaded: HashSet<u32>,
     placements: HashMap<u32, u32>,
+    output: Box<dyn KittyOutput>,
+}
+
+impl std::fmt::Debug for KittyImageRegistry {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("KittyImageRegistry")
+            .field("loaded", &self.loaded)
+            .field("placements", &self.placements)
+            .finish_non_exhaustive()
+    }
 }
 
 impl KittyImageRegistry {
+    fn with_output(output: Box<dyn KittyOutput>) -> Self {
+        Self {
+            loaded: HashSet::new(),
+            placements: HashMap::new(),
+            output,
+        }
+    }
+
     pub fn delete_placements_in<I: IntoIterator<Item = u32>>(
         &mut self,
         placement_ids: I,
@@ -381,7 +416,7 @@ impl KittyImageRegistry {
     }
 
     pub fn place_at(&mut self, origin: CellOffset, opts: PlaceOptions) -> Result<()> {
-        position_cursor(origin)?;
+        position_cursor(self.output.as_ref(), origin)?;
         self.place(opts)
     }
 
@@ -389,7 +424,13 @@ impl KittyImageRegistry {
     /// the terminal in a clean state. Don't call mid-session — use
     /// [`ImageSurface::forget_all`] if you want to reset images cleanly.
     pub fn shutdown(&mut self) {
-        let _ = write_stdout_all(b"\x1b_Ga=d,d=A,q=2;\x1b\\");
+        let _ = self.output.write_all(b"\x1b_Ga=d,d=A,q=2;\x1b\\");
+    }
+}
+
+impl Default for KittyImageRegistry {
+    fn default() -> Self {
+        Self::with_output(Box::new(StdoutKittyOutput))
     }
 }
 
@@ -402,7 +443,7 @@ impl ImageSurface for KittyImageRegistry {
         if self.loaded.contains(&image_id) {
             return Ok(());
         }
-        transmit_png(image_id, png)?;
+        transmit_png(self.output.as_ref(), image_id, png)?;
         self.loaded.insert(image_id);
         Ok(())
     }
@@ -411,7 +452,7 @@ impl ImageSurface for KittyImageRegistry {
         if self.placements.contains_key(&opts.placement_id) {
             self.delete_placement(opts.placement_id)?;
         }
-        write!(io::stdout().lock(), "{}", kitty_place_escape(opts))?;
+        self.output.write_all(kitty_place_escape(opts).as_bytes())?;
         self.placements.insert(opts.placement_id, opts.image_id);
         Ok(())
     }
@@ -420,11 +461,8 @@ impl ImageSurface for KittyImageRegistry {
         if self.placements.get(&placement_id).copied() == Some(image_id) {
             self.placements.remove(&placement_id);
         }
-        write!(
-            io::stdout().lock(),
-            "{}",
-            kitty_delete_placement_escape(image_id, placement_id)
-        )?;
+        self.output
+            .write_all(kitty_delete_placement_escape(image_id, placement_id).as_bytes())?;
         Ok(())
     }
 
@@ -432,11 +470,8 @@ impl ImageSurface for KittyImageRegistry {
         let Some(image_id) = self.placements.remove(&placement_id) else {
             return Ok(());
         };
-        write!(
-            io::stdout().lock(),
-            "{}",
-            kitty_delete_placement_escape(image_id, placement_id)
-        )?;
+        self.output
+            .write_all(kitty_delete_placement_escape(image_id, placement_id).as_bytes())?;
         Ok(())
     }
 
@@ -450,7 +485,8 @@ impl ImageSurface for KittyImageRegistry {
 
     fn forget_all(&mut self) -> Result<()> {
         for id in self.loaded.iter() {
-            write!(io::stdout().lock(), "\x1b_Ga=d,d=I,i={id},q=2;\x1b\\")?;
+            self.output
+                .write_all(format!("\x1b_Ga=d,d=I,i={id},q=2;\x1b\\").as_bytes())?;
         }
         self.loaded.clear();
         self.placements.clear();
@@ -458,44 +494,41 @@ impl ImageSurface for KittyImageRegistry {
     }
 
     fn flush(&self) -> Result<()> {
-        io::stdout().flush()?;
+        self.output.flush()?;
         Ok(())
     }
 }
 
-fn position_cursor(origin: CellOffset) -> Result<()> {
-    write!(
-        io::stdout().lock(),
-        "\x1b[{};{}H",
-        origin.row.saturating_add(1).max(1),
-        origin.col.saturating_add(1).max(1)
-    )?;
+fn position_cursor(output: &dyn KittyOutput, origin: CellOffset) -> Result<()> {
+    output.write_all(cursor_position_escape(origin).as_bytes())?;
     Ok(())
 }
 
-fn transmit_png(image_id: u32, png: &[u8]) -> Result<()> {
+fn transmit_png(output: &dyn KittyOutput, image_id: u32, png: &[u8]) -> Result<()> {
     let encoded = base64::engine::general_purpose::STANDARD.encode(png);
     let mut chunks = encoded.as_bytes().chunks(4096).peekable();
     let mut first = true;
     while let Some(chunk) = chunks.next() {
         let more = u8::from(chunks.peek().is_some());
         if first {
-            write!(
-                io::stdout().lock(),
-                "\x1b_Ga=t,f=100,i={image_id},m={more};{}\x1b\\",
-                std::str::from_utf8(chunk)?
-            )?;
+            output.write_all(format!("\x1b_Ga=t,f=100,i={image_id},m={more};").as_bytes())?;
             first = false;
         } else {
-            write!(
-                io::stdout().lock(),
-                "\x1b_Gi={image_id},m={more};{}\x1b\\",
-                std::str::from_utf8(chunk)?
-            )?;
+            output.write_all(format!("\x1b_Gi={image_id},m={more};").as_bytes())?;
         }
-        io::stdout().flush()?;
+        output.write_all(chunk)?;
+        output.write_all(b"\x1b\\")?;
+        output.flush()?;
     }
     Ok(())
+}
+
+fn cursor_position_escape(origin: CellOffset) -> String {
+    format!(
+        "\x1b[{};{}H",
+        origin.row.saturating_add(1).max(1),
+        origin.col.saturating_add(1).max(1)
+    )
 }
 
 fn kitty_delete_placement_escape(image_id: u32, placement_id: u32) -> String {
@@ -532,6 +565,42 @@ pub fn picker_placement_id(item_index: usize) -> u32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::cell::{Cell, RefCell};
+    use std::rc::Rc;
+
+    #[derive(Clone, Default)]
+    struct CapturedKittyOutput {
+        bytes: Rc<RefCell<Vec<u8>>>,
+        flushes: Rc<Cell<usize>>,
+    }
+
+    impl CapturedKittyOutput {
+        fn take_string(&self) -> String {
+            String::from_utf8(std::mem::take(&mut *self.bytes.borrow_mut())).unwrap()
+        }
+
+        fn flushes(&self) -> usize {
+            self.flushes.get()
+        }
+    }
+
+    impl KittyOutput for CapturedKittyOutput {
+        fn write_all(&self, bytes: &[u8]) -> io::Result<()> {
+            self.bytes.borrow_mut().extend_from_slice(bytes);
+            Ok(())
+        }
+
+        fn flush(&self) -> io::Result<()> {
+            self.flushes.set(self.flushes.get() + 1);
+            Ok(())
+        }
+    }
+
+    fn captured_kitty_registry() -> (KittyImageRegistry, CapturedKittyOutput) {
+        let output = CapturedKittyOutput::default();
+        let registry = KittyImageRegistry::with_output(Box::new(output.clone()));
+        (registry, output)
+    }
 
     #[test]
     fn backend_preference_rejects_empty_auto_detect_order() {
@@ -647,6 +716,59 @@ mod tests {
         assert_eq!(
             escape,
             "\x1b_Ga=p,i=7,p=9,q=2,x=11,y=13,w=17,h=19,c=23,r=29;\x1b\\"
+        );
+    }
+
+    #[test]
+    fn kitty_registry_upload_chunks_and_flushes_through_capture_output() {
+        let (mut registry, output) = captured_kitty_registry();
+        let png = vec![0_u8; 4096];
+
+        registry.ensure_loaded(42, &png).unwrap();
+        registry.ensure_loaded(42, &png).unwrap();
+
+        let bytes = output.take_string();
+        assert_eq!(bytes.matches("\x1b_Ga=t,f=100,i=42,m=1;").count(), 1);
+        assert_eq!(bytes.matches("\x1b_Gi=42,m=0;").count(), 1);
+        assert_eq!(bytes.matches("\x1b\\").count(), 2);
+        assert_eq!(output.flushes(), 2);
+    }
+
+    #[test]
+    fn kitty_registry_capture_records_cursor_place_and_replacement_delete() {
+        let (mut registry, output) = captured_kitty_registry();
+        let first = lifecycle_opts(7, 9, 3, 4);
+        let replacement = lifecycle_opts(8, 9, 5, 6);
+
+        registry
+            .place_at(CellOffset { col: 2, row: 3 }, first)
+            .unwrap();
+        registry.place(replacement).unwrap();
+
+        assert_eq!(
+            output.take_string(),
+            format!(
+                "{}{}{}{}",
+                cursor_position_escape(CellOffset { col: 2, row: 3 }),
+                kitty_place_escape(first),
+                kitty_delete_placement_escape(7, 9),
+                kitty_place_escape(replacement),
+            )
+        );
+    }
+
+    #[test]
+    fn kitty_registry_capture_records_forget_and_shutdown_cleanup() {
+        let (mut registry, output) = captured_kitty_registry();
+
+        registry.ensure_loaded(7, b"png").unwrap();
+        output.take_string();
+        registry.forget_all().unwrap();
+        registry.shutdown();
+
+        assert_eq!(
+            output.take_string(),
+            "\x1b_Ga=d,d=I,i=7,q=2;\x1b\\\x1b_Ga=d,d=A,q=2;\x1b\\"
         );
     }
 
