@@ -1,10 +1,13 @@
 //! Prototype remote-render protocol helpers for `tui-kit-cli`.
 //!
-//! This module is intentionally small and explicit. It defines the handshake
-//! environment variables, the line-oriented input codec, a line-oriented frame
-//! decoder, and the SSH argument builder used by the prototype launcher. It is
-//! not a stable wire protocol.
+//! This module is intentionally explicit. It defines the handshake environment
+//! variables, the line-oriented input codec, the `TKF1` frame decoder, and the
+//! transport/session boundary used by the prototype launcher. It is not a
+//! stable wire protocol.
 
+use std::fmt;
+use std::io::{BufRead, BufReader, Write};
+use std::process::{Child, Command, ExitStatus, Stdio};
 use std::sync::Arc;
 
 use anyhow::{anyhow, bail, Context, Result};
@@ -67,6 +70,183 @@ pub fn remote_ssh_args(spec: &RemoteRunSpec) -> Vec<String> {
     ];
     args.extend(spec.command.iter().cloned());
     args
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RemoteStderrPolicy {
+    Inherit,
+    Null,
+}
+
+impl RemoteStderrPolicy {
+    fn stdio(self) -> Stdio {
+        match self {
+            Self::Inherit => Stdio::inherit(),
+            Self::Null => Stdio::null(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RemoteExitStatus {
+    success: bool,
+    code: Option<i32>,
+}
+
+impl RemoteExitStatus {
+    pub fn success() -> Self {
+        Self {
+            success: true,
+            code: Some(0),
+        }
+    }
+
+    pub fn failure(code: i32) -> Self {
+        Self {
+            success: false,
+            code: Some(code),
+        }
+    }
+
+    pub fn from_exit_status(status: ExitStatus) -> Self {
+        Self {
+            success: status.success(),
+            code: status.code(),
+        }
+    }
+
+    pub fn is_success(self) -> bool {
+        self.success
+    }
+
+    pub fn code(self) -> Option<i32> {
+        self.code
+    }
+}
+
+impl fmt::Display for RemoteExitStatus {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match (self.success, self.code) {
+            (true, Some(code)) => write!(f, "exit code {code}"),
+            (true, None) => f.write_str("successful exit"),
+            (false, Some(code)) => write!(f, "exit code {code}"),
+            (false, None) => f.write_str("terminated without an exit code"),
+        }
+    }
+}
+
+pub trait RemoteInputWriter {
+    fn write_input_event(&mut self, input: InputEvent) -> Result<()>;
+}
+
+#[derive(Debug)]
+pub struct RemoteLineInputWriter<W> {
+    writer: W,
+}
+
+impl<W> RemoteLineInputWriter<W> {
+    pub fn new(writer: W) -> Self {
+        Self { writer }
+    }
+
+    pub fn into_inner(self) -> W {
+        self.writer
+    }
+}
+
+impl<W: Write> RemoteInputWriter for RemoteLineInputWriter<W> {
+    fn write_input_event(&mut self, input: InputEvent) -> Result<()> {
+        writeln!(self.writer, "{}", encode_input_event(input))
+            .context("failed to write remote input event")?;
+        self.writer
+            .flush()
+            .context("failed to flush remote input event")?;
+        Ok(())
+    }
+}
+
+pub trait RemoteTransport {
+    fn read_output_line(&mut self) -> Result<Option<String>>;
+    fn try_wait(&mut self) -> Result<Option<RemoteExitStatus>>;
+    fn wait(&mut self) -> Result<RemoteExitStatus>;
+    fn stderr_policy(&self) -> RemoteStderrPolicy;
+}
+
+#[derive(Debug)]
+pub struct SshRemoteTransport {
+    child: Child,
+    stdout: BufReader<std::process::ChildStdout>,
+    stderr_policy: RemoteStderrPolicy,
+}
+
+impl SshRemoteTransport {
+    pub fn spawn(
+        spec: &RemoteRunSpec,
+        stderr_policy: RemoteStderrPolicy,
+    ) -> Result<(Self, impl RemoteInputWriter + Send + 'static)> {
+        let ssh_args = remote_ssh_args(spec);
+        let mut child = Command::new("ssh")
+            .args(&ssh_args)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(stderr_policy.stdio())
+            .spawn()
+            .with_context(|| format!("failed to spawn ssh for {}", spec.host))?;
+        let stdin = child
+            .stdin
+            .take()
+            .ok_or_else(|| anyhow!("failed to capture ssh stdin"))?;
+        let stdout = child
+            .stdout
+            .take()
+            .ok_or_else(|| anyhow!("failed to capture ssh stdout"))?;
+        Ok((
+            Self {
+                child,
+                stdout: BufReader::new(stdout),
+                stderr_policy,
+            },
+            RemoteLineInputWriter::new(stdin),
+        ))
+    }
+}
+
+impl RemoteTransport for SshRemoteTransport {
+    fn read_output_line(&mut self) -> Result<Option<String>> {
+        let mut line = String::new();
+        let bytes = self
+            .stdout
+            .read_line(&mut line)
+            .context("failed to read remote stdout")?;
+        if bytes == 0 {
+            return Ok(None);
+        }
+        if line.ends_with('\n') {
+            line.pop();
+            if line.ends_with('\r') {
+                line.pop();
+            }
+        }
+        Ok(Some(line))
+    }
+
+    fn try_wait(&mut self) -> Result<Option<RemoteExitStatus>> {
+        self.child
+            .try_wait()
+            .context("failed polling ssh child")
+            .map(|status| status.map(RemoteExitStatus::from_exit_status))
+    }
+
+    fn wait(&mut self) -> Result<RemoteExitStatus> {
+        self.child
+            .wait()
+            .context("failed waiting for ssh child")
+            .map(RemoteExitStatus::from_exit_status)
+    }
+
+    fn stderr_policy(&self) -> RemoteStderrPolicy {
+        self.stderr_policy
+    }
 }
 
 pub fn encode_input_event(input: InputEvent) -> String {
@@ -193,6 +373,106 @@ impl RemoteFrameDecoder {
             return result.map(Some);
         }
         Ok(None)
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RemoteSessionState {
+    Startup,
+    AwaitingFirstFrame,
+    Streaming,
+    Passthrough,
+    Eof,
+    ChildExited,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RemoteSessionEvent {
+    Frame(RenderFrame),
+    Passthrough(String),
+    Eof,
+    ChildExited(RemoteExitStatus),
+}
+
+#[derive(Debug)]
+pub struct RemoteSession<T> {
+    transport: T,
+    decoder: RemoteFrameDecoder,
+    state: RemoteSessionState,
+    saw_frame: bool,
+}
+
+impl<T: RemoteTransport> RemoteSession<T> {
+    pub fn new(transport: T) -> Self {
+        Self {
+            transport,
+            decoder: RemoteFrameDecoder::new(),
+            state: RemoteSessionState::Startup,
+            saw_frame: false,
+        }
+    }
+
+    pub fn state(&self) -> RemoteSessionState {
+        self.state
+    }
+
+    pub fn transport(&self) -> &T {
+        &self.transport
+    }
+
+    pub fn transport_mut(&mut self) -> &mut T {
+        &mut self.transport
+    }
+
+    pub fn into_transport(self) -> T {
+        self.transport
+    }
+
+    pub fn next_event(&mut self) -> Result<RemoteSessionEvent> {
+        if !self.saw_frame
+            && matches!(
+                self.state,
+                RemoteSessionState::Startup | RemoteSessionState::Passthrough
+            )
+        {
+            self.state = RemoteSessionState::AwaitingFirstFrame;
+        }
+
+        loop {
+            let Some(line) = self.transport.read_output_line()? else {
+                if self.decoder.is_pending() {
+                    bail!("remote stream ended before completing a frame");
+                }
+                if let Some(status) = self.transport.try_wait()? {
+                    self.state = RemoteSessionState::ChildExited;
+                    return Ok(RemoteSessionEvent::ChildExited(status));
+                }
+                self.state = RemoteSessionState::Eof;
+                return Ok(RemoteSessionEvent::Eof);
+            };
+
+            match self.decoder.push_line(line)? {
+                Some(RemoteOutput::Frame(frame)) => {
+                    self.saw_frame = true;
+                    self.state = RemoteSessionState::Streaming;
+                    return Ok(RemoteSessionEvent::Frame(frame));
+                }
+                Some(RemoteOutput::Passthrough(line)) => {
+                    self.state = RemoteSessionState::Passthrough;
+                    return Ok(RemoteSessionEvent::Passthrough(line));
+                }
+                None => {}
+            }
+        }
+    }
+
+    pub fn wait_for_exit(&mut self) -> Result<RemoteExitStatus> {
+        if self.decoder.is_pending() {
+            bail!("remote stream ended before completing a frame");
+        }
+        let status = self.transport.wait()?;
+        self.state = RemoteSessionState::ChildExited;
+        Ok(status)
     }
 }
 
