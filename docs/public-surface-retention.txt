@@ -8,7 +8,9 @@
 Bordered - Element decorator retained with Panel/Window composition; covered by in-module element tests and required by the public ElementExt chain.
 CachedRenderStats - Public cache instrumentation returned by Cached::stats for consumers that need cache-hit assertions.
 CanvasUpdate - Layout delta type retained for image-viewport viewport math and future renderer-frame diffing.
+CellRect - Placement output uses this typed cell extent for consumers that plan image layout without terminal placement side effects.
 CellOffset - RenderEffect::PlaceImage origin and ImageSurfaceRegistry::place_at use this as the typed cell position boundary.
+ClippedSides - Placement output reports source/destination clipping with this typed edge set for status displays and layout diagnostics.
 Completion - Scheduler completion record retained with Scheduler for machine-readable background work accounting.
 ComponentChildren - BufferComponent tree-inspection return type used by elements and retained as part of the component contract.
 ConfigError - Validate implementations use this typed configuration diagnostic instead of stringly errors.
@@ -30,6 +32,7 @@ ImageProtocol - ImageBackendPreference exposes this protocol enum for explicit/a
 ImageSurfaceRegistry - Terminal owns this concrete registry and exposes it through Terminal::images.
 ImageViewportElement - Effect-aware adapter from ImageViewportWidget into the Element/RenderEffect composition layer.
 ImageViewportError - Public error type for image viewport construction, placement, zoom, pan, and export operations.
+ImageViewportPlacement - ImageViewportWidget reports terminal placement geometry with this typed output for consumers that use the widget directly.
 KeyMapped - Element decorator retained for local keymap scoping around an element.
 KeyResolution - KeyMap lookup result retained for callers that need to distinguish handled, unbound, and disabled keys.
 KeyScope - Serializable key-scope description retained with WindowFocusScope for modal/window key handling.
@@ -46,6 +49,7 @@ Panel - Presentational element container retained as the canonical chrome wrappe
 PixelExtent - Validated non-zero pixel extent used by image viewport sizing and error reporting.
 PixelRect - Typed source rectangle used by PlaceOptions and render-effect image placement.
 PlaceOptions - Image placement command payload shared by ImageSurface and RenderEffect.
+PlacementAnchor - Placement output reports the image-space anchor point for consumers that surface pan/zoom diagnostics.
 PlacementEngine - Generic placement calculator retained for consumers that need layout planning without ImageViewportWidget.
 RenderEffect - Data-only renderer intent emitted by EffectElement and used by testkit assertions.
 RgbaImage - Owned RGBA pixel buffer for image viewport creation and export paths.
@@ -57,9 +61,14 @@ StackDirection - Stack orientation policy.
 TextOverflow - Text rendering policy for Text.
 TransparencySupport - ImageSurface capability enum for alpha-handling decisions.
 UnscaledPixelOffset - ViewTransform stores pan offsets in unscaled source-image pixels.
+PixelDistance - ImageViewportWidget pan steps use this typed non-negative pixel distance instead of raw integers.
+StepDirection - ImageViewportWidget pan operations use this enum for axis-independent step direction.
+ViewportAxis - ImageViewportWidget pan operations use this enum to select horizontal or vertical movement.
 Validate - Small config-validation trait used by TerminalConfig and backend policy types.
 WindowChrome - Window rendering configuration retained with the Window element.
 WindowFocusScope - Window key/focus-scope configuration retained with Window.
 WindowLifecycleEvent - Window lifecycle message type emitted by the Window element.
 WindowRenderStats - Window instrumentation for render/activation behavior.
 WindowRepaintPolicy - Window repaint policy retained to make cached window behavior explicit.
+ZoomDirection - ImageViewportWidget zoom operations use this enum for direction-specific scale changes.
+ZoomFactor - ImageViewportWidget stores the validated zoom factor with this public newtype.
