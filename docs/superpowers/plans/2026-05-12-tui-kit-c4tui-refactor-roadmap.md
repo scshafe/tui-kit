@@ -1,13 +1,16 @@
 # tui-kit + c4tui Refactor Roadmap
 
-> **Status:** SUPERSEDED for forward planning. Use
-> [`2026-05-13-fresh-library-author-plan.md`](./2026-05-13-fresh-library-author-plan.md)
-> and
-> [`2026-05-13-library-author-direction.md`](./2026-05-13-library-author-direction.md)
-> as the active direction. This document remains as historical context for the
-> 2026-05-12 refactor sequence.
+> **Status:** ACTIVE forward roadmap as of 2026-06-13. Phases 1-6 are complete
+> and their one-shot implementation plans/handoffs have been archived under
+> `docs/superpowers/archive/`. Phase 7 is the next executable phase.
 
-> **For agentic workers:** This is a phased *roadmap*, not a task-by-task plan. Each phase contains an **Architect handoff prompt** block. When you're ready to execute a phase, fire that prompt at the `the-architect` agent (subagent_type: `the-architect`) to produce the detailed task-by-task plan in the standard writing-plans style. Then execute the resulting per-phase plan via `superpowers:subagent-driven-development`.
+> **For agentic workers:** Execute Phases 7, 8, and 9 one after another as a
+> continuous comprehensive workflow. For each phase: write the detailed plan,
+> implement it end to end, verify both repos where applicable, commit, then
+> immediately continue to the next phase unless blocked by an external
+> dependency. Do not pause after Phase 7 or Phase 8 merely to ask what comes
+> next. Phase 10 is a separate follow-up session focused on intensive code
+> quality assessment and refactoring strategy.
 
 **Goal:** Execute the seventeen refactors from the 2026-05-12 architecture review of tui-kit and c4tui, in dependency order, terminating in a clean implementation of the `LinkDirectory` keyboard-first navigation model, while preserving tui-kit's longer-term path toward local and remote renderer backends.
 
@@ -757,7 +760,7 @@ the later remote-renderer phases.
 - **#13** — Promote the "real consumer" rule from an addition test to a retention test. Add a CI audit (a small Rust script or `cargo` plugin invocation, or a shell script) that lists tui-kit's public types and flags any with zero references in c4tui or in tui-kit's own tests.
 - **#14** — Reconcile README + specification.md + architecture.md in both repos against the actual post-refactor code state. After Phase 3 in particular, the docs need to match reality: which trait, which image widget, and the fact that `elements` remains as a render-effect substrate rather than a NavPicker substrate.
 - **New direction** — Add a concise render-backend note to tui-kit docs: local terminal rendering is implemented today; remote-renderer protocol and SSH client tooling are future work; render effects are the bridge.
-- **#15** — Archive or restructure `c4tui/implementation-plan.md`. The current document describes Phases 0-6 of c4tui's *original* implementation, which is finished. Either rename to `docs/historical-plan-phase-0-6.md` or add a Status: COMPLETE header plus a forward-looking "Phase 7" section that points at this roadmap.
+- **#15** — Confirm c4tui's original implementation plan is archived and linked as historical. The current archive path is `c4tui/docs/archive/historical-plan-phase-0-6.md`; Phase 7 should verify README/spec/architecture links point to active docs or historical archive paths.
 - **#16** — Add the SVG→PNG→Kitty→placement image-pipeline stage diagram in `c4tui/architecture.md`. The architect's review noted this absence is why ViewStore's three jobs were conflated; the diagram makes the Phase 6 split self-evident.
 - **#17** — Write a short cross-repo testing-patterns doc. After Phase 3 the `FakeTerminalBackend` is much smaller and the gap between it and tui-kit's `testkit` has narrowed; document the patterns side-by-side so they don't drift apart again.
 
@@ -773,7 +776,7 @@ The retention-tooling item could in principle go earlier, but it's most useful a
 - README, specification.md, architecture.md in both repos accurate and agreeing with each other and with the code.
 - tui-kit docs describe `elements` as composable buffer rendering plus explicit
   render effects, not as a retained UI framework.
-- `c4tui/implementation-plan.md` clearly historical, not roadmap.
+- c4tui's original implementation plan clearly historical, not roadmap.
 - Image-pipeline stage diagram in `c4tui/architecture.md`.
 - A `docs/testing-patterns.md` (or similar) in one of the repos describing the testkit / FakeTerminalBackend pattern pair.
 
@@ -819,11 +822,10 @@ Phase 7 scope — five items from the architecture review:
             ViewportState split, NavPicker, ActiveModal.
           - c4tui/README.md should match.
 
-  #15 — Either archive c4tui/implementation-plan.md (rename to
-        c4tui/docs/historical-plan-phase-0-6.md) and replace with a
-        pointer to this roadmap, OR add a "Status: COMPLETE" header to
-        the existing plan plus a "Phase 7" section that defers to this
-        roadmap. Architect's call.
+  #15 — Confirm c4tui's original implementation plan is archived at
+        c4tui/docs/archive/historical-plan-phase-0-6.md and that active docs
+        link to it only as historical context. If any active doc still points
+        to c4tui/implementation-plan.md as a current plan, fix it.
 
   #16 — Add an image-pipeline stage diagram to c4tui/architecture.md
         showing the three stages explicitly:
@@ -853,7 +855,7 @@ Hard constraints:
 
 Files to ground-truth:
   All README.md, specification.md, architecture.md files (both repos).
-  c4tui/implementation-plan.md.
+  c4tui/docs/archive/historical-plan-phase-0-6.md.
   Whatever CI configuration exists.
 
 Save plan to:
@@ -938,6 +940,93 @@ streaming arbitrary terminal bytes or relying on local screen capture.
 
 - `tui-kit-cli run ssh://host -- app` can launch a compatible remote tui-kit
   app and render it locally.
+
+---
+
+## Phase 10 — Intensive code quality assessment and refactoring strategy
+
+### Scope
+
+Review both repos after the Phase 7-9 workflow lands. This is a planning and
+assessment phase, not a broad implementation phase. The goal is to identify
+aggressive but coherent refactoring opportunities that improve code quality,
+composition, reuse, naming, module boundaries, testability, and maintainability.
+
+### Items covered
+
+- Audit core modules in both repos for duplicated logic, oversized modules,
+  weak abstractions, unclear ownership boundaries, insufficient composition,
+  brittle tests, and avoidable policy leakage.
+- Identify places where stronger patterns would simplify the code: small
+  focused traits, explicit state machines, typed command/effect boundaries,
+  builder or config validation patterns, ownership-oriented APIs, and reusable
+  test fixtures.
+- Review public APIs for cohesion and consumer pressure. Keep the existing
+  discipline: every public surface should have a real consumer or a documented
+  reason to remain.
+- Review c4tui-specific orchestration for opportunities to simplify `App`,
+  terminal rendering, modal construction, scheduler integration, and navigation
+  flows without regressing user-facing behavior.
+- Produce a prioritized findings report with proposed remediation phases.
+
+### End state of phase
+
+- A committed assessment document with findings, severity/impact, code
+  references, and proposed refactor waves.
+- A concrete follow-on roadmap that converts findings into implementation
+  phases. The follow-on phases should be sequenced by risk and dependency, not
+  by file order.
+- No large refactor should be implemented in Phase 10 except tiny doc or test
+  fixes needed to make the assessment precise.
+
+### Architect handoff prompt
+
+```text
+You're being asked to perform Phase 10 of the tui-kit + c4tui roadmap: an
+intensive code quality assessment and refactoring strategy pass.
+
+Repos:
+  /Users/coleshaffer/Projects/tui-kit
+  /Users/coleshaffer/Projects/c4tui
+
+Assume Phases 7, 8, and 9 have landed before this review starts. Read the
+current README/specification/architecture docs and the final Phase 7-9
+handoffs before reviewing code.
+
+Review both repos with an eye for aggressive but coherent quality improvement:
+  - duplication and non-DRY logic;
+  - oversized modules or functions;
+  - weak module boundaries;
+  - places where composition would beat branching;
+  - unclear ownership or lifecycle APIs;
+  - public surfaces without strong consumer pressure;
+  - test fixtures that should become reusable helpers;
+  - brittle or missing tests around important contracts;
+  - naming, error paths, and config validation inconsistencies;
+  - opportunities to use explicit state machines, typed effects, small traits,
+    builders, or other strong Rust patterns.
+
+Do not implement broad refactors during this assessment. Produce a committed
+document:
+  /Users/coleshaffer/Projects/tui-kit/docs/superpowers/plans/
+    2026-06-13-phase-10-code-quality-assessment.md
+
+The document must include:
+  - findings ordered by severity/impact;
+  - exact file/line references;
+  - proposed remediation waves;
+  - risks and test strategy for each wave;
+  - a follow-on phase list for implementing the remediation.
+```
+
+---
+
+## Phase 11+ — Remediation waves from Phase 10 findings
+
+Phase 11 and later are intentionally not specified in detail yet. They should be
+generated by the Phase 10 assessment and should act on that review's findings in
+small, verifiable waves. Each wave should have a plan, implementation, tests,
+and a commit before the next wave begins.
 - Plain `ssh -t host app` remains a fallback path for apps that choose normal
   terminal mode.
 - The client exposes only allowlisted rendering/input capabilities. No
@@ -965,18 +1054,19 @@ For reference, here's the architect's prioritized list from the 2026-05-12 revie
 | 12 | Split `ViewStore` into catalog / render-cache / viewport-state | c4tui | Phase 6 |
 | 13 | Promote "real consumer" rule to a retention test (CI audit) | both | Phase 7 |
 | 14 | Reconcile README + spec + architecture after the above land | both | Phase 7 |
-| 15 | Archive c4tui's `implementation-plan.md` | c4tui | Phase 7 |
+| 15 | Confirm c4tui's historical implementation plan archive and active-doc links | c4tui | Phase 7 |
 | 16 | Add stage-1/2/3 image-pipeline diagram in c4tui architecture | c4tui | Phase 7 |
 | 17 | Write short cross-repo testing-patterns doc | both | Phase 7 |
+| 18 | Intensive code quality assessment and refactoring strategy | both | Phase 10 |
 
-All 17 review items are covered across the first seven phases. Phases 8-9 are
-new directional work, not part of the original review list.
+All 17 original review items are covered across the first seven phases.
+Phases 8-10 are new directional work, not part of the original review list.
 
 ---
 
 ## Execution notes
 
-- **Inter-phase commits:** Each phase should end on green tests in both repos and a clean commit (or commit series). Do not start the next phase's architect prompt until the prior phase's plan is fully executed and committed.
+- **Inter-phase commits:** Each phase should end on green tests in both repos and a clean commit (or commit series). For the Phase 7-9 workflow, start the next phase immediately after the prior phase is fully executed and committed.
 - **Plan vs roadmap:** This document is the roadmap. The per-phase plans the architect will produce are the actionable artifacts. Treat this document as durable; treat per-phase plans as one-shot.
-- **Order is significant.** Phase 1 unblocks Phase 3's trait usage. Phase 2 unblocks Phase 3's event types. Phase 3 unblocks Phases 4-6. Phase 5 is the c4tui goal. Phases 8-9 must not start until the render/effect contract is documented and the local app cleanup is complete. Don't reorder without re-running the dependency check.
+- **Order is significant.** Phase 1 unblocks Phase 3's trait usage. Phase 2 unblocks Phase 3's event types. Phase 3 unblocks Phases 4-6. Phase 5 is the c4tui goal. Phase 7 documents and locks the local contract. Phase 8 builds the render/effect backend model. Phase 9 builds the remote launcher on top of Phase 8. Phase 10 reviews the resulting codebase and plans remediation. Don't reorder without re-running the dependency check.
 - **If a phase plan reveals the order is wrong:** stop, update this roadmap, then re-run the affected phase prompts. Don't silently improvise.

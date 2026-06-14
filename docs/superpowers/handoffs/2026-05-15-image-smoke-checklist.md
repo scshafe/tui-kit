@@ -4,8 +4,8 @@
 **Owner:** operator (live-terminal verification). Agents write this file;
 operators run it.
 **Plan reference:** Phase D of
-[`../plans/2026-05-14-revised-library-author-implementation-plan.md`](../plans/2026-05-14-revised-library-author-implementation-plan.md)
-and [`../plans/2026-05-15-phase-D-image-reliability.md`](../plans/2026-05-15-phase-D-image-reliability.md).
+[`../archive/plans/2026-05-14-revised-library-author-implementation-plan.md`](../archive/plans/2026-05-14-revised-library-author-implementation-plan.md)
+and [`../archive/plans/2026-05-15-phase-D-image-reliability.md`](../archive/plans/2026-05-15-phase-D-image-reliability.md).
 
 ## What this checklist verifies
 
