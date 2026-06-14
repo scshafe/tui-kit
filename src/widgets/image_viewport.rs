@@ -6,7 +6,10 @@
 //! export; terminal cell aspect ratio is not baked into exported pixels.
 
 use crate::image::PlaceOptions;
-use crate::layout::{CanvasMetrics, CellOffset, ImagePoint, PixelRect, PixelSize};
+use crate::layout::{
+    image_viewport_placement_geometry, CanvasMetrics, CellOffset, ImagePoint,
+    ImageViewportPlacementRequest, PixelRect, PixelSize,
+};
 use serde::{Deserialize, Serialize};
 use std::error::Error;
 use std::fmt;
@@ -226,13 +229,13 @@ impl ImageViewport {
                 let src_x = scaled_to_source(scaled_x, self.image.size.width, scale);
                 copy_rgba(
                     self.image.rgba(),
-                    self.image.size.width,
                     &mut out,
-                    widget_pixels.width,
-                    src_x,
-                    src_y,
-                    x,
-                    y,
+                    RgbaCopy {
+                        src_width: self.image.size.width,
+                        dst_width: widget_pixels.width,
+                        src: PixelCoordinate { x: src_x, y: src_y },
+                        dst: PixelCoordinate { x, y },
+                    },
                 );
             }
         }
@@ -293,40 +296,24 @@ impl ImageViewport {
         }
 
         let theoretical = self.theoretical_size()?;
-        let crop = viewport_crop(self.offset, theoretical, widget_pixels);
-        if crop.visible.width == 0 || crop.visible.height == 0 {
-            return Ok(None);
-        }
-
-        let cell_pixel = canvas.cell_pixel.or_fallback();
-        let origin = CellOffset {
-            col: round_to_cell_offset(crop.destination_offset_x, cell_pixel.width)
-                .min(canvas.cells.cols),
-            row: round_to_cell_offset(crop.destination_offset_y, cell_pixel.height)
-                .min(canvas.cells.rows),
-        };
-        let available_cols = canvas
-            .cells
-            .cols
-            .saturating_sub(origin.col.min(canvas.cells.cols));
-        let available_rows = canvas
-            .cells
-            .rows
-            .saturating_sub(origin.row.min(canvas.cells.rows));
-        let cell_cols = round_to_cells(crop.visible.width, cell_pixel.width).min(available_cols);
-        let cell_rows = round_to_cells(crop.visible.height, cell_pixel.height).min(available_rows);
-        if cell_cols == 0 || cell_rows == 0 {
-            return Ok(None);
-        }
-
-        Ok(Some(ImageViewportPlacement {
-            source: crop.source(self.image.size, self.scale),
-            origin,
-            cell_cols,
-            cell_rows,
-            visible_pixels: crop.visible,
-            theoretical_pixels: theoretical,
-        }))
+        Ok(
+            image_viewport_placement_geometry(ImageViewportPlacementRequest {
+                image: self.image.size,
+                theoretical,
+                scale: self.scale.get(),
+                offset_x: self.offset.x,
+                offset_y: self.offset.y,
+                canvas,
+            })
+            .map(|geometry| ImageViewportPlacement {
+                source: geometry.source,
+                origin: geometry.origin,
+                cell_cols: geometry.cell_cols,
+                cell_rows: geometry.cell_rows,
+                visible_pixels: geometry.visible_pixels,
+                theoretical_pixels: geometry.theoretical_pixels,
+            }),
+        )
     }
 
     fn source_point_at_widget_pixel(&self, widget_pixel: (f64, f64)) -> (f64, f64) {
@@ -584,39 +571,6 @@ impl ImageViewportPlacement {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct ViewportCrop {
-    left: u32,
-    top: u32,
-    visible: PixelSize,
-    destination_offset_x: u32,
-    destination_offset_y: u32,
-}
-
-impl ViewportCrop {
-    fn source(self, image: PixelSize, scale: ImageScale) -> PixelRect {
-        let scale = scale.get();
-        let x = (self.left as f64 / scale).round().max(0.0) as u32;
-        let y = (self.top as f64 / scale).round().max(0.0) as u32;
-        let width = (self.visible.width as f64 / scale)
-            .round()
-            .max(1.0)
-            .min(image.width as f64) as u32;
-        let height = (self.visible.height as f64 / scale)
-            .round()
-            .max(1.0)
-            .min(image.height as f64) as u32;
-        let x = x.min(image.width.saturating_sub(1));
-        let y = y.min(image.height.saturating_sub(1));
-        PixelRect {
-            x,
-            y,
-            width: width.min(image.width.saturating_sub(x)),
-            height: height.min(image.height.saturating_sub(y)),
-        }
-    }
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ViewportAxis {
     X,
@@ -837,41 +791,6 @@ fn scaled_to_source(scaled_coordinate: i64, source_extent: u32, scale: f64) -> u
         .clamp(0, i64::from(source_extent.saturating_sub(1))) as u32
 }
 
-fn viewport_crop(
-    offset: ScaledPixelOffset,
-    theoretical: PixelSize,
-    widget: PixelSize,
-) -> ViewportCrop {
-    let left = offset.x.max(0).min(i64::from(theoretical.width)) as u32;
-    let top = offset.y.max(0).min(i64::from(theoretical.height)) as u32;
-    let right = offset
-        .x
-        .saturating_add(i64::from(widget.width))
-        .max(0)
-        .min(i64::from(theoretical.width)) as u32;
-    let bottom = offset
-        .y
-        .saturating_add(i64::from(widget.height))
-        .max(0)
-        .min(i64::from(theoretical.height)) as u32;
-
-    ViewportCrop {
-        left,
-        top,
-        visible: PixelSize::new(right.saturating_sub(left), bottom.saturating_sub(top)),
-        destination_offset_x: offset
-            .x
-            .saturating_neg()
-            .max(0)
-            .min(i64::from(widget.width)) as u32,
-        destination_offset_y: offset
-            .y
-            .saturating_neg()
-            .max(0)
-            .min(i64::from(widget.height)) as u32,
-    }
-}
-
 fn widget_center(size: PixelSize) -> (f64, f64) {
     (size.width as f64 / 2.0, size.height as f64 / 2.0)
 }
@@ -889,36 +808,25 @@ fn centered_offset(theoretical: PixelSize, widget: PixelSize) -> ScaledPixelOffs
     )
 }
 
-fn round_to_cell_offset(pixels: u32, cell_pixels: u16) -> u16 {
-    (pixels as f64 / f64::from(cell_pixels.max(1)))
-        .round()
-        .max(0.0)
-        .min(u16::MAX as f64) as u16
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct PixelCoordinate {
+    x: u32,
+    y: u32,
 }
 
-fn round_to_cells(pixels: u32, cell_pixels: u16) -> u16 {
-    if pixels == 0 {
-        return 0;
-    }
-    (pixels as f64 / f64::from(cell_pixels.max(1)))
-        .round()
-        .max(1.0)
-        .min(u16::MAX as f64) as u16
-}
-
-#[allow(clippy::too_many_arguments)]
-fn copy_rgba(
-    src: &[u8],
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct RgbaCopy {
     src_width: u32,
-    dst: &mut [u8],
     dst_width: u32,
-    src_x: u32,
-    src_y: u32,
-    dst_x: u32,
-    dst_y: u32,
-) {
-    let src_i = (((u64::from(src_y) * u64::from(src_width)) + u64::from(src_x)) * 4) as usize;
-    let dst_i = (((u64::from(dst_y) * u64::from(dst_width)) + u64::from(dst_x)) * 4) as usize;
+    src: PixelCoordinate,
+    dst: PixelCoordinate,
+}
+
+fn copy_rgba(src: &[u8], dst: &mut [u8], copy: RgbaCopy) {
+    let src_i = (((u64::from(copy.src.y) * u64::from(copy.src_width)) + u64::from(copy.src.x)) * 4)
+        as usize;
+    let dst_i = (((u64::from(copy.dst.y) * u64::from(copy.dst_width)) + u64::from(copy.dst.x)) * 4)
+        as usize;
     dst[dst_i..dst_i + 4].copy_from_slice(&src[src_i..src_i + 4]);
 }
 
@@ -1106,10 +1014,33 @@ mod tests {
             (zoomed_again.cell_cols, zoomed_again.cell_rows),
             (before.cell_cols, before.cell_rows)
         );
-        assert!(zoomed.source.width < before.source.width);
-        assert!(zoomed.source.height < before.source.height);
-        assert!(zoomed_again.source.width < zoomed.source.width);
-        assert!(zoomed_again.source.height < zoomed.source.height);
+        assert_eq!(
+            before.source,
+            PixelRect {
+                x: 0,
+                y: 0,
+                width: 200,
+                height: 150,
+            }
+        );
+        assert_eq!(
+            zoomed.source,
+            PixelRect {
+                x: 50,
+                y: 38,
+                width: 100,
+                height: 75,
+            }
+        );
+        assert_eq!(
+            zoomed_again.source,
+            PixelRect {
+                x: 75,
+                y: 56,
+                width: 50,
+                height: 38,
+            }
+        );
     }
 
     #[test]
@@ -1128,6 +1059,16 @@ mod tests {
 
         assert_eq!(placement.visible_pixels, PixelSize::new(200, 150));
         assert_eq!(placement.origin, CellOffset { col: 0, row: 0 });
+        assert_eq!((placement.cell_cols, placement.cell_rows), (20, 10));
+        assert_eq!(
+            placement.source,
+            PixelRect {
+                x: 0,
+                y: 0,
+                width: 800,
+                height: 600,
+            }
+        );
 
         viewport.set_offset(ScaledPixelOffset::new(-100, -75));
         let centered = viewport
@@ -1139,6 +1080,31 @@ mod tests {
             .unwrap();
         assert_eq!(centered.visible_pixels, PixelSize::new(200, 150));
         assert_eq!(centered.origin, CellOffset { col: 10, row: 5 });
+        assert_eq!((centered.cell_cols, centered.cell_rows), (20, 10));
+        assert_eq!(centered.source, placement.source);
+    }
+
+    #[test]
+    fn placement_returns_none_when_scaled_image_misses_canvas() {
+        let mut viewport = ImageViewport::new(source_image());
+
+        viewport.set_offset(ScaledPixelOffset::new(900, 0));
+        assert!(viewport
+            .placement(CanvasMetrics::new(
+                CellSize::new(20, 10),
+                CellPixel::new(10, 15),
+            ))
+            .unwrap()
+            .is_none());
+
+        viewport.set_offset(ScaledPixelOffset::new(-300, 0));
+        assert!(viewport
+            .placement(CanvasMetrics::new(
+                CellSize::new(20, 10),
+                CellPixel::new(10, 15),
+            ))
+            .unwrap()
+            .is_none());
     }
 
     #[test]
@@ -1390,13 +1356,13 @@ mod tests {
                 let src_x = scaled_to_source(scaled_x, image.size().width, scale);
                 copy_rgba(
                     image.rgba(),
-                    image.size().width,
                     &mut out,
-                    widget.width,
-                    src_x,
-                    src_y,
-                    x,
-                    y,
+                    RgbaCopy {
+                        src_width: image.size().width,
+                        dst_width: widget.width,
+                        src: PixelCoordinate { x: src_x, y: src_y },
+                        dst: PixelCoordinate { x, y },
+                    },
                 );
             }
         }

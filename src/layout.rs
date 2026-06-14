@@ -1,5 +1,3 @@
-#![allow(dead_code)]
-
 //! Pixel/cell layout math for image-heavy terminal UIs.
 //!
 //! This module owns deterministic fit, zoom, pan, clipping, placement, and
@@ -216,6 +214,26 @@ pub struct Placement {
     pub unclipped_display_pixels: PixelSize,
     pub clipped_sides: ClippedSides,
     pub anchor: PlacementAnchor,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct ImageViewportPlacementRequest {
+    pub image: PixelSize,
+    pub theoretical: PixelSize,
+    pub scale: f64,
+    pub offset_x: i64,
+    pub offset_y: i64,
+    pub canvas: CanvasMetrics,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct ImageViewportPlacementGeometry {
+    pub source: PixelRect,
+    pub origin: CellOffset,
+    pub cell_cols: u16,
+    pub cell_rows: u16,
+    pub visible_pixels: PixelSize,
+    pub theoretical_pixels: PixelSize,
 }
 
 impl Placement {
@@ -741,27 +759,29 @@ fn place_with_policy(
         let origin_row = canvas.cells.rows.saturating_sub(rows) / 2;
         (cols, rows, origin_col, origin_row)
     };
-    let clipped_sides = clipped_sides(
+    let source = PixelRect {
+        x: src_x,
+        y: src_y,
+        width: src_w,
+        height: src_h,
+    };
+    let clipped_sides = clipped_sides(ClipContext {
         image,
         canvas_pixels,
-        src_x,
-        src_y,
-        src_w,
-        src_h,
-        display_w,
-        display_h,
-        visible_w,
-        visible_h,
-        policy.overflow,
-    );
+        source,
+        display: FloatDimensions {
+            width: display_w,
+            height: display_h,
+        },
+        visible: FloatDimensions {
+            width: visible_w,
+            height: visible_h,
+        },
+        overflow: policy.overflow,
+    });
 
     Placement {
-        source: PixelRect {
-            x: src_x,
-            y: src_y,
-            width: src_w,
-            height: src_h,
-        },
+        source,
         size: CellRect {
             cols: target_cols,
             rows: target_rows,
@@ -779,33 +799,39 @@ fn place_with_policy(
     }
 }
 
-#[allow(clippy::too_many_arguments)]
-fn clipped_sides(
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct FloatDimensions {
+    width: f32,
+    height: f32,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct ClipContext {
     image: PixelSize,
     canvas_pixels: PixelSize,
-    src_x: u32,
-    src_y: u32,
-    src_w: u32,
-    src_h: u32,
-    display_w: f32,
-    display_h: f32,
-    visible_w: f32,
-    visible_h: f32,
+    source: PixelRect,
+    display: FloatDimensions,
+    visible: FloatDimensions,
     overflow: ImageOverflowPolicy,
-) -> ClippedSides {
-    match overflow {
+}
+
+fn clipped_sides(context: ClipContext) -> ClippedSides {
+    match context.overflow {
         ImageOverflowPolicy::CropSourceToArea | ImageOverflowPolicy::LetterboxImageAspect => {
             ClippedSides {
-                left: src_x > 0,
-                right: src_x.saturating_add(src_w) < image.width,
-                top: src_y > 0,
-                bottom: src_y.saturating_add(src_h) < image.height,
+                left: context.source.x > 0,
+                right: context.source.x.saturating_add(context.source.width) < context.image.width,
+                top: context.source.y > 0,
+                bottom: context.source.y.saturating_add(context.source.height)
+                    < context.image.height,
             }
         }
         ImageOverflowPolicy::OverflowAndClipDestination
         | ImageOverflowPolicy::OverflowCellsBeyondArea => {
-            let horizontal = display_w > visible_w || display_w > canvas_pixels.width as f32;
-            let vertical = display_h > visible_h || display_h > canvas_pixels.height as f32;
+            let horizontal = context.display.width > context.visible.width
+                || context.display.width > context.canvas_pixels.width as f32;
+            let vertical = context.display.height > context.visible.height
+                || context.display.height > context.canvas_pixels.height as f32;
             ClippedSides {
                 left: horizontal,
                 right: horizontal,
@@ -817,6 +843,145 @@ fn clipped_sides(
             ClippedSides::NONE
         }
     }
+}
+
+pub(crate) fn image_viewport_placement_geometry(
+    request: ImageViewportPlacementRequest,
+) -> Option<ImageViewportPlacementGeometry> {
+    let widget_pixels = request.canvas.pixels();
+    if request.image.width == 0
+        || request.image.height == 0
+        || request.theoretical.width == 0
+        || request.theoretical.height == 0
+        || widget_pixels.width == 0
+        || widget_pixels.height == 0
+        || !request.scale.is_finite()
+        || request.scale <= 0.0
+    {
+        return None;
+    }
+
+    let crop = scaled_viewport_crop(
+        request.offset_x,
+        request.offset_y,
+        request.theoretical,
+        widget_pixels,
+    );
+    if crop.visible.width == 0 || crop.visible.height == 0 {
+        return None;
+    }
+
+    let cell_pixel = request.canvas.cell_pixel.or_fallback();
+    let origin = CellOffset {
+        col: round_viewport_cell_offset(crop.destination_offset_x, cell_pixel.width)
+            .min(request.canvas.cells.cols),
+        row: round_viewport_cell_offset(crop.destination_offset_y, cell_pixel.height)
+            .min(request.canvas.cells.rows),
+    };
+    let available_cols = request
+        .canvas
+        .cells
+        .cols
+        .saturating_sub(origin.col.min(request.canvas.cells.cols));
+    let available_rows = request
+        .canvas
+        .cells
+        .rows
+        .saturating_sub(origin.row.min(request.canvas.cells.rows));
+    let cell_cols = round_viewport_cells(crop.visible.width, cell_pixel.width).min(available_cols);
+    let cell_rows =
+        round_viewport_cells(crop.visible.height, cell_pixel.height).min(available_rows);
+    if cell_cols == 0 || cell_rows == 0 {
+        return None;
+    }
+
+    Some(ImageViewportPlacementGeometry {
+        source: scaled_viewport_source(crop, request.image, request.scale),
+        origin,
+        cell_cols,
+        cell_rows,
+        visible_pixels: crop.visible,
+        theoretical_pixels: request.theoretical,
+    })
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct ScaledViewportCrop {
+    left: u32,
+    top: u32,
+    visible: PixelSize,
+    destination_offset_x: u32,
+    destination_offset_y: u32,
+}
+
+fn scaled_viewport_crop(
+    offset_x: i64,
+    offset_y: i64,
+    theoretical: PixelSize,
+    widget: PixelSize,
+) -> ScaledViewportCrop {
+    let left = offset_x.max(0).min(i64::from(theoretical.width)) as u32;
+    let top = offset_y.max(0).min(i64::from(theoretical.height)) as u32;
+    let right = offset_x
+        .saturating_add(i64::from(widget.width))
+        .max(0)
+        .min(i64::from(theoretical.width)) as u32;
+    let bottom = offset_y
+        .saturating_add(i64::from(widget.height))
+        .max(0)
+        .min(i64::from(theoretical.height)) as u32;
+
+    ScaledViewportCrop {
+        left,
+        top,
+        visible: PixelSize::new(right.saturating_sub(left), bottom.saturating_sub(top)),
+        destination_offset_x: offset_x
+            .saturating_neg()
+            .max(0)
+            .min(i64::from(widget.width)) as u32,
+        destination_offset_y: offset_y
+            .saturating_neg()
+            .max(0)
+            .min(i64::from(widget.height)) as u32,
+    }
+}
+
+fn scaled_viewport_source(crop: ScaledViewportCrop, image: PixelSize, scale: f64) -> PixelRect {
+    let x = (crop.left as f64 / scale).round().max(0.0) as u32;
+    let y = (crop.top as f64 / scale).round().max(0.0) as u32;
+    let width = (crop.visible.width as f64 / scale)
+        .round()
+        .max(1.0)
+        .min(image.width as f64) as u32;
+    let height = (crop.visible.height as f64 / scale)
+        .round()
+        .max(1.0)
+        .min(image.height as f64) as u32;
+    let x = x.min(image.width.saturating_sub(1));
+    let y = y.min(image.height.saturating_sub(1));
+    PixelRect {
+        x,
+        y,
+        width: width.min(image.width.saturating_sub(x)),
+        height: height.min(image.height.saturating_sub(y)),
+    }
+}
+
+fn round_viewport_cell_offset(pixels: u32, cell_pixels: u16) -> u16 {
+    (pixels as f64 / f64::from(cell_pixels.max(1)))
+        .round()
+        .max(0.0)
+        .min(u16::MAX as f64) as u16
+}
+
+fn round_viewport_cells(pixels: u32, cell_pixels: u16) -> u16 {
+    if pixels == 0 {
+        return 0;
+    }
+    (pixels as f64 / f64::from(cell_pixels.max(1)))
+        .round()
+        .max(1.0)
+        .min(u16::MAX as f64) as u16
 }
 
 fn scale_basis(
@@ -904,6 +1069,33 @@ mod tests {
         CanvasMetrics::new(CellSize::new(cols, rows), CellPixel::new(8, 16))
     }
 
+    fn viewport_canvas(cols: u16, rows: u16, cell_width: u16, cell_height: u16) -> CanvasMetrics {
+        CanvasMetrics::new(
+            CellSize::new(cols, rows),
+            CellPixel::new(cell_width, cell_height),
+        )
+    }
+
+    fn viewport_request(
+        scale: f64,
+        offset_x: i64,
+        offset_y: i64,
+        canvas: CanvasMetrics,
+    ) -> ImageViewportPlacementRequest {
+        let image = PixelSize::new(800, 600);
+        ImageViewportPlacementRequest {
+            image,
+            theoretical: PixelSize::new(
+                (image.width as f64 * scale).round() as u32,
+                (image.height as f64 * scale).round() as u32,
+            ),
+            scale,
+            offset_x,
+            offset_y,
+            canvas,
+        }
+    }
+
     #[test]
     fn tail_viewport_tracks_newest_items_by_default() {
         let viewport = TailViewport::new(10, 4, 0);
@@ -971,6 +1163,110 @@ mod tests {
         let zoomed = ViewTransform::fit().with_scale(2.0).place(image, canvas);
         assert!(zoomed.source.width < image.width);
         assert!(zoomed.source.height < image.height);
+    }
+
+    #[test]
+    fn image_viewport_geometry_reports_source_crop_and_destination_cells() {
+        let placement = image_viewport_placement_geometry(viewport_request(
+            2.0,
+            920,
+            600,
+            viewport_canvas(20, 10, 10, 15),
+        ))
+        .unwrap();
+
+        assert_eq!(placement.theoretical_pixels, PixelSize::new(1600, 1200));
+        assert_eq!(placement.visible_pixels, PixelSize::new(200, 150));
+        assert_eq!(
+            placement.source,
+            PixelRect {
+                x: 460,
+                y: 300,
+                width: 100,
+                height: 75,
+            }
+        );
+        assert_eq!(placement.origin, CellOffset { col: 0, row: 0 });
+        assert_eq!(placement.cell_cols, 20);
+        assert_eq!(placement.cell_rows, 10);
+    }
+
+    #[test]
+    fn image_viewport_geometry_shrinks_source_crop_after_cells_fill_canvas() {
+        let canvas = viewport_canvas(20, 10, 10, 15);
+        let before =
+            image_viewport_placement_geometry(viewport_request(1.0, 0, 0, canvas)).unwrap();
+        let zoomed =
+            image_viewport_placement_geometry(viewport_request(2.0, 100, 75, canvas)).unwrap();
+        let zoomed_again =
+            image_viewport_placement_geometry(viewport_request(4.0, 300, 225, canvas)).unwrap();
+
+        assert_eq!((before.cell_cols, before.cell_rows), (20, 10));
+        assert_eq!((zoomed.cell_cols, zoomed.cell_rows), (20, 10));
+        assert_eq!((zoomed_again.cell_cols, zoomed_again.cell_rows), (20, 10));
+        assert_eq!(
+            before.source,
+            PixelRect {
+                x: 0,
+                y: 0,
+                width: 200,
+                height: 150,
+            }
+        );
+        assert_eq!(
+            zoomed.source,
+            PixelRect {
+                x: 50,
+                y: 38,
+                width: 100,
+                height: 75,
+            }
+        );
+        assert_eq!(
+            zoomed_again.source,
+            PixelRect {
+                x: 75,
+                y: 56,
+                width: 50,
+                height: 38,
+            }
+        );
+    }
+
+    #[test]
+    fn image_viewport_geometry_places_smaller_scaled_image_by_destination_offset() {
+        let canvas = viewport_canvas(40, 20, 10, 15);
+        let top_left =
+            image_viewport_placement_geometry(viewport_request(0.25, 0, 0, canvas)).unwrap();
+        let centered =
+            image_viewport_placement_geometry(viewport_request(0.25, -100, -75, canvas)).unwrap();
+
+        assert_eq!(top_left.visible_pixels, PixelSize::new(200, 150));
+        assert_eq!(top_left.origin, CellOffset { col: 0, row: 0 });
+        assert_eq!((top_left.cell_cols, top_left.cell_rows), (20, 10));
+        assert_eq!(
+            top_left.source,
+            PixelRect {
+                x: 0,
+                y: 0,
+                width: 800,
+                height: 600,
+            }
+        );
+        assert_eq!(centered.visible_pixels, PixelSize::new(200, 150));
+        assert_eq!(centered.origin, CellOffset { col: 10, row: 5 });
+        assert_eq!((centered.cell_cols, centered.cell_rows), (20, 10));
+        assert_eq!(centered.source, top_left.source);
+    }
+
+    #[test]
+    fn image_viewport_geometry_returns_none_when_scaled_image_misses_canvas() {
+        let canvas = viewport_canvas(20, 10, 10, 15);
+
+        assert!(image_viewport_placement_geometry(viewport_request(1.0, 900, 0, canvas)).is_none());
+        assert!(
+            image_viewport_placement_geometry(viewport_request(1.0, -300, 0, canvas)).is_none()
+        );
     }
 
     #[test]
