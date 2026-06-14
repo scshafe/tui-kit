@@ -40,6 +40,7 @@ an application selected a row or what a selected image represents.
 | `layout` | Cell/pixel metrics, placements, transforms, crops, viewport math |
 | `image` | Kitty image registry and image-surface abstraction |
 | `renderer` | Buffer/effect frame contract and renderer backend trait |
+| `remote` | Prototype SSH launcher protocol helpers and frame/input codecs |
 | `terminal` | Crossterm/ratatui terminal lifecycle plus image flushing |
 | `widgets` | Dialog, grid, and image viewport widgets |
 | `bar` | Priority-aware status-line layout |
@@ -75,8 +76,8 @@ from leaking out of ordinary buffer rendering.
 The same split is also the compatibility path for future remote rendering.
 A client-side renderer can consume buffer cells and render effects over a
 structured transport, while the application keeps the same event, layout, and
-component boundaries. The current repository does not implement that transport;
-the architecture should avoid closing the door on it.
+component boundaries. The current repository includes only a prototype
+line-oriented launcher protocol; the production transport remains future work.
 
 ## 4. Geometry Model
 
@@ -199,7 +200,30 @@ that transform child areas must also transform effect origins and group
 teardown. It should stay narrow. It should not grow into a retained component
 tree runtime, app state container, or product-specific UI framework.
 
-## 9. Scheduler and Watcher
+## 9. Remote Launcher Prototype
+
+The `remote` module and `src/bin/tui-kit-cli.rs` provide the first client-side
+prototype:
+
+```text
+tui-kit-cli run ssh://host -- app
+  -> ssh -tt host env TUI_KIT_REMOTE_RENDER=1
+                     TUI_KIT_REMOTE_PROTOCOL=tui-kit-remote-v1
+                     app
+```
+
+The launcher enters a local `Terminal`, forwards typed input/mouse/resize
+events to the remote app as newline-delimited protocol messages, decodes
+`TKF1` frame blocks from remote stdout into `RenderFrame`, and renders those
+frames locally. Non-protocol stdout lines are treated as passthrough diagnostics
+and logged rather than executed.
+
+The prototype intentionally omits host profiles, reconnection, authentication
+management, background agents, arbitrary local command execution, and implicit
+screen capture. Plain `ssh -t host app` remains the fallback for applications
+that choose ordinary terminal rendering.
+
+## 10. Scheduler and Watcher
 
 The scheduler is a generic priority queue. Work runs outside the foreground UI
 path and reports completion through the shared event channel. Progress data is
@@ -209,7 +233,7 @@ items without parsing logs.
 The watcher wraps notify with debounce and emits workspace-change events. It is
 not tied to any particular file format.
 
-## 10. Testing Architecture
+## 11. Testing Architecture
 
 The testkit (`src/testkit.rs`) mirrors the public boundaries:
 
@@ -262,7 +286,7 @@ crossing a boundary it shouldn't.
 See [docs/testing-patterns.md](./docs/testing-patterns.md) for worked examples
 of both seams.
 
-## 11. Extension Rules
+## 12. Extension Rules
 
 New public surfaces should meet at least one of these tests:
 

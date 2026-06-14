@@ -39,8 +39,8 @@ application displays, how that data is loaded, or what commands mean.
 - Automatic persistence, settings discovery, or app-specific configuration
   schemas.
 - Browser, GUI, or web rendering.
-- SSH clients, remote-render protocols, or persistent agents in this
-  specification version.
+- Production remote-render transports, host-profile management, or persistent
+  agents.
 - Image protocols other than the Kitty graphics protocol unless a real consumer
   justifies the added surface area.
 
@@ -100,10 +100,14 @@ The `terminal` module wraps ratatui/crossterm terminal lifecycle setup,
 alternate-screen/raw-mode cleanup, image flushing, terminal metrics, and local
 `RendererBackend` application.
 
+The `remote` module defines the prototype line codecs used by `tui-kit-cli`:
+argument parsing for `run ssh://host -- app`, typed input-event lines, and
+`TKF1` buffer/effect frame decoding. This is not a stable wire protocol.
+
 Future renderer backends may consume the same buffers and render effects through
-a structured transport instead of writing terminal escape sequences directly.
-That protocol is not specified here, but current APIs should avoid assuming
-that every renderer is the process-local `stdout`.
+a production structured transport instead of writing terminal escape sequences
+directly. That protocol is not specified here, but current APIs should avoid
+assuming that every renderer is the process-local `stdout`.
 
 ### 4.7 Widgets
 
@@ -153,8 +157,9 @@ tui-kit targets terminal applications using ratatui 0.29 and crossterm 0.28.
 The crate is early and may still revise APIs, but changes should preserve the
 core split between domain-neutral primitives and caller-owned application
 behavior. Local terminal rendering is the implemented compatibility target
-today through `Terminal`'s `RendererBackend` implementation; remote-render
-clients remain future work.
+today through `Terminal`'s `RendererBackend` implementation. The
+`tui-kit-cli` remote launcher is a prototype for compatible apps; production
+remote-render clients remain future work.
 
 ## 7. Out of Scope for This Specification
 

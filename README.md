@@ -4,7 +4,7 @@ Opinionated middleware for building terminal UI applications. Sits on top of [`r
 
 ## Status
 
-Early. The crate is a domain-neutral substrate for terminal applications that need typed input, focus scopes, buffer-rendered components, explicit render effects, image placement, layout math, scheduling, and test utilities without adopting a full application framework. Local terminal sessions are the implemented target today; `renderer::RenderFrame` and `RendererBackend` make the buffer/effect split explicit enough to keep future remote renderers possible.
+Early. The crate is a domain-neutral substrate for terminal applications that need typed input, focus scopes, buffer-rendered components, explicit render effects, image placement, layout math, scheduling, and test utilities without adopting a full application framework. Local terminal sessions are the implemented target today; `renderer::RenderFrame`, `RendererBackend`, and the prototype `tui-kit-cli` remote launcher make the buffer/effect split explicit enough to keep future remote renderers possible.
 
 ## Documents
 
@@ -27,6 +27,7 @@ Early. The crate is a domain-neutral substrate for terminal applications that ne
 | `image` | `KittyImageRegistry` + `ImageSurface` trait - transmit-once-place-many image lifecycle |
 | `layout` | `PixelSize`, `CellSize`, `CanvasMetrics`, `ViewTransform`, `Placement`, `TailViewport` - fit/zoom/pan math plus tail-scroll viewport math |
 | `renderer` | `RenderFrame`, `RendererBackend`, and `ImageSurfaceRenderer` for buffer/effect backend tests and adapters |
+| `remote` | Prototype `tui-kit-cli` SSH launcher protocol helpers and line codecs |
 | `bar` | `StatusFragment`, `SegmentSlot`, `layout_status_line` priority truncation |
 | `scheduler` | Priority-queue task scheduler with custom-priority generic, scoped cancellation, machine-readable queue/timing stats |
 | `watcher` | notify-based file watcher with debounce, emits `WatcherEvent::WorkspaceChanged` |
@@ -101,6 +102,26 @@ effects apply to the local `ImageSurfaceRegistry` through `Terminal` or an
 `ImageSurfaceRenderer`; later they can become the wire intent consumed by a
 local renderer for a remote app.
 
+## Remote launcher prototype
+
+`tui-kit-cli` includes an experimental remote-render launcher:
+
+```sh
+tui-kit-cli run ssh://host -- app [args...]
+```
+
+The command shells out to OpenSSH as `ssh -tt host env
+TUI_KIT_REMOTE_RENDER=1 TUI_KIT_REMOTE_PROTOCOL=tui-kit-remote-v1 app
+[args...]`. Local keyboard, mouse, and resize events are encoded as typed
+line messages to remote stdin. A compatible remote app can write `TKF1`
+line-delimited frames to stdout; the local client decodes those frames into
+`renderer::RenderFrame` and renders them with the local terminal backend.
+
+This is a prototype protocol, not a stable transport. There are no host
+profiles, no persistent agent, no screen capture, and no arbitrary local
+command execution. Apps that choose ordinary terminal mode should still be run
+with plain `ssh -t host app`.
+
 ## Removed pending consumer demand
 
 These public surfaces were pruned after they showed no durable consumer demand. Reintroduce any of them only with a named consumer in the same change set.
@@ -115,7 +136,7 @@ These public surfaces were pruned after they showed no durable consumer demand. 
 ## Out of scope (today)
 
 - Image surfaces other than Kitty graphics (Sixel, iTerm2)
-- Remote renderer transport/protocol, SSH launcher, and client-side helper binaries
+- Production remote renderer transport/protocol, host profiles, persistent agents
 - Async runtimes (tokio/async-std) - uses sync threads + channels
 - Full component tree runtime orchestration
 - Generic focus traversal, theming, additional widgets (list/table/tree/tabs), runtime config bundles, subscription primitives, periodic tick producers - all deliberately removed pending consumer demand
