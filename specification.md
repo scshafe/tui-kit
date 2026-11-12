@@ -153,7 +153,7 @@ image and renderer backends, and deterministic scheduler tools for tests.
 
 ## 6. Compatibility
 
-tui-kit targets terminal applications using ratatui 0.29 and crossterm 0.28.
+tui-kit targets terminal applications using ratatui 0.30 and crossterm 0.29.
 The crate is early and may still revise APIs, but changes should preserve the
 core split between domain-neutral primitives and caller-owned application
 behavior. Local terminal rendering is the implemented compatibility target
